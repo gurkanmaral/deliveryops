@@ -1,0 +1,75 @@
+appId: com.deliveryops.courier
+name: Kurye giriş, vardiya, paket üstlenme ve teslimat akışı
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    permissions:
+      all: allow
+- openLink: ${DEV_CLIENT_URL}
+- tapOn:
+    text: Open
+    optional: true
+    label: iOS geliştirme bağlantısı onayını kabul et
+- extendedWaitUntil:
+    visible: Continue
+    timeout: 15000
+- tapOn:
+    text: Continue
+    label: Expo geliştirme istemcisi ilk kullanım ekranını kapat
+- tapOn:
+    text: Close
+    optional: true
+    label: Açık kalan Expo geliştirme menüsünü kapat
+- extendedWaitUntil:
+    visible: Giriş yap
+    timeout: 30000
+- tapOn:
+    id: sign-in-email
+- eraseText
+- inputText: ${COURIER_EMAIL}
+- tapOn:
+    id: sign-in-password
+- eraseText
+- inputText: ${COURIER_PASSWORD}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: Vardiya kapalı
+    timeout: 20000
+- tapOn: Vardiyayı başlat
+- extendedWaitUntil:
+    visible: Vardiya aktif
+    timeout: 15000
+- tapOn: Paket Havuzu, tab, 3 of 4
+- extendedWaitUntil:
+    visible: ${TEST_CUSTOMER}
+    timeout: 15000
+- tapOn: Paketi üstlen
+- tapOn: Paketlerim, tab, 2 of 4
+- scrollUntilVisible:
+    element:
+      text: ${TEST_CUSTOMER}
+    direction: DOWN
+    timeout: 15000
+- tapOn: Paketi aldım
+- extendedWaitUntil:
+    visible: Teslim alındı
+    timeout: 10000
+- tapOn: Yola çıktım
+- extendedWaitUntil:
+    visible: Yolda
+    timeout: 10000
+- tapOn: Teslim ettim
+- extendedWaitUntil:
+    notVisible: ${TEST_CUSTOMER}
+    timeout: 10000
+- tapOn: Vardiya, tab, 1 of 4
+- tapOn: Vardiyayı bitir
+- extendedWaitUntil:
+    visible: Vardiya kapalı
+    timeout: 10000
+- tapOn: Profil, tab, 4 of 4
+- tapOn: Çıkış yap
+- extendedWaitUntil:
+    visible: Giriş yap
+    timeout: 15000

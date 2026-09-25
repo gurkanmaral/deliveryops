@@ -1,0 +1,41 @@
+export const colors = {
+  background: '#F4F3EF',
+  surface: '#FFFFFF',
+  surfaceMuted: '#EFEEE9',
+  surfaceElevated: '#FAFAF8',
+  primary: '#F0521A',
+  primaryDark: '#B0380B',
+  primarySoft: '#FFF1EA',
+  primaryBorder: '#F6CDB9',
+  accent: '#3B82F6',
+  accentSoft: '#EBF2FE',
+  ink: '#18181B',
+  inkSoft: '#26262A',
+  text: '#18181B',
+  textSecondary: '#3F3F46',
+  textMuted: '#71717A',
+  textFaint: '#A1A1AA',
+  border: '#E7E5DF',
+  borderStrong: '#D7D4CB',
+  danger: '#C42B2B',
+  dangerSoft: '#FDEEEE',
+  warning: '#A35A06',
+  warningSoft: '#FDF4E3',
+  success: '#15803D',
+  successSoft: '#E9F6EE',
+  successDot: '#22A55A',
+  white: '#FFFFFF',
+  black: '#131315',
+  shadow: '#18181B',
+};
+
+export const tones = {
+  neutral: { fg: colors.textSecondary, bg: colors.surfaceMuted },
+  primary: { fg: colors.primaryDark, bg: colors.primarySoft },
+  info: { fg: '#1D5FD8', bg: colors.accentSoft },
+  success: { fg: colors.success, bg: colors.successSoft },
+  warning: { fg: colors.warning, bg: colors.warningSoft },
+  danger: { fg: colors.danger, bg: colors.dangerSoft },
+} as const;
+
+export type Tone = keyof typeof tones;

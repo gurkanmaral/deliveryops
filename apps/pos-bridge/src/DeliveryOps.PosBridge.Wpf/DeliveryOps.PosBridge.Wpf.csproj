@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DeliveryOps.PosBridge</AssemblyName>
+    <RootNamespace>DeliveryOps.PosBridge.Wpf</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <ProjectReference Include="../DeliveryOps.PosBridge.Core/DeliveryOps.PosBridge.Core.csproj" />
+  </ItemGroup>
+</Project>

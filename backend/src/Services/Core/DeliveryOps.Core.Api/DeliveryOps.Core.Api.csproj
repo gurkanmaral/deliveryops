@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
+    <PackageReference Include="MuPDF.Fonts" Version="1.0.4" />
+    <PackageReference Include="MediatR" Version="12.4.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.11" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.11.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\DeliveryOps.BuildingBlocks\DeliveryOps.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\DeliveryOps.Core.Domain\DeliveryOps.Core.Domain.csproj" />
+    <ProjectReference Include="..\DeliveryOps.Core.Queries\DeliveryOps.Core.Queries.csproj" />
+    <ProjectReference Include="..\DeliveryOps.Core.Handlers\DeliveryOps.Core.Handlers.csproj" />
+    <ProjectReference Include="..\DeliveryOps.Core.Infrastructure\DeliveryOps.Core.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

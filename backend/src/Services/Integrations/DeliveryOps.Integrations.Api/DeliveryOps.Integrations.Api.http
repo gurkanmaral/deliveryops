@@ -1,0 +1,91 @@
+@host = http://localhost:5400
+@connectionId = replace-with-connection-id
+@apiKey = replace-with-one-time-secret
+@yemeksepetiAuthorization = replace-with-the-exact-configured-authorization-value
+@accessToken = replace-with-admin-access-token
+@clientId = replace-with-partner-client-id
+@clientSecret = replace-with-partner-client-secret
+@chainId = replace-with-partner-chain-id
+
+GET {{host}}/health
+
+### Canonical v1 webhook — API key mode
+POST {{host}}/api/v1/webhooks/{{connectionId}}/orders
+Content-Type: application/json
+X-DeliveryOps-Key: {{apiKey}}
+
+{
+  "eventId": "evt-2026-0001",
+  "eventType": "order.created",
+  "externalOrderId": "MARKET-2026-0001",
+  "customerName": "Test Müşteri",
+  "customerPhone": "05550000000",
+  "deliveryAddress": "Kadıköy, İstanbul",
+  "totalAmount": 245.50
+}
+
+### Yemeksepeti Partner API v2 order notification — Static Authorization mode
+POST {{host}}/api/v1/webhooks/{{connectionId}}/orders
+Content-Type: application/json
+Authorization: {{yemeksepetiAuthorization}}
+
+{
+  "order_id": "e3dc8329-1b9d-4b23-9091-a322259ea4a0",
+  "external_order_id": "YS-2026-0001",
+  "order_code": "ab12-cd34",
+  "status": "RECEIVED",
+  "order_type": "DELIVERY",
+  "customer": {
+    "first_name": "Test",
+    "last_name": "Müşteri",
+    "phone_number": "+905550000000",
+    "delivery_address": {
+      "street": "Bağdat Caddesi",
+      "number": "100",
+      "suburb": "Kadıköy",
+      "city": "İstanbul",
+      "instructions": "Kapıyı çalmayın"
+    }
+  },
+  "payment": {
+    "order_total": 245.50
+  },
+  "sys": {
+    "updated_at": "2026-09-18T12:00:00Z"
+  },
+  "transport_type": "DELIVERY"
+}
+
+### Event monitor
+GET {{host}}/api/v1/integrations/events?take=50
+Authorization: Bearer {{accessToken}}
+
+### Configure Yemeksepeti OAuth — environment 0 sandbox, 1 production
+PUT {{host}}/api/v1/integrations/{{connectionId}}/yemeksepeti-credentials
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "clientId": "{{clientId}}",
+  "clientSecret": "{{clientSecret}}",
+  "chainId": "{{chainId}}",
+  "environment": 0
+}
+
+### Test Yemeksepeti OAuth credentials with a fresh token request
+POST {{host}}/api/v1/integrations/{{connectionId}}/test
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+### The automatic worker uses IntegrationHealthChecks settings.
+### Defaults: every 15 minutes, alert after 2 consecutive failures.
+
+### Outbound provider status monitor
+GET {{host}}/api/v1/integrations/outbound-events?take=50
+Authorization: Bearer {{accessToken}}
+
+### Monitoring dashboard — days: 1, 7 or 30
+GET {{host}}/api/v1/integrations/monitoring?days=7
+Authorization: Bearer {{accessToken}}

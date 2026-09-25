@@ -1,0 +1,184 @@
+name: deliveryops
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: deliveryops-postgres
+    environment:
+      POSTGRES_DB: deliveryops_core
+      POSTGRES_USER: deliveryops
+      POSTGRES_PASSWORD: deliveryops_dev
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:5432:5432"
+    volumes:
+      - deliveryops-postgres:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deliveryops -d deliveryops_core"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: deliveryops-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:${DELIVERYOPS_REDIS_PORT:-6380}:6379"
+    volumes:
+      - deliveryops-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: deliveryops-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: deliveryops
+      RABBITMQ_DEFAULT_PASS: deliveryops_dev
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:${DELIVERYOPS_RABBITMQ_PORT:-5673}:5672"
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:${DELIVERYOPS_RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    volumes:
+      - deliveryops-rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrations:
+    profiles: ["application"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrations
+      args:
+        SERVICE_PROJECT: src/Services/Core/DeliveryOps.Core.Api/DeliveryOps.Core.Api.csproj
+    environment: &api-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__CoreDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:-deliveryops_dev}
+      ConnectionStrings__AuthDatabase: Host=postgres;Port=5432;Database=deliveryops_auth;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:-deliveryops_dev}
+      ConnectionStrings__NotificationsDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:-deliveryops_dev}
+      ConnectionStrings__IntegrationsDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:-deliveryops_dev}
+      ConnectionStrings__Redis: redis:6379
+      Jwt__SigningKey: ${DELIVERYOPS_JWT_SIGNING_KEY:-development-only-signing-key-change-before-production-2026}
+      OrderPii__SearchKey: ${DELIVERYOPS_ORDER_SEARCH_KEY:-development-order-search-key-change-before-production-2026}
+      Notifications__InternalApiKey: ${DELIVERYOPS_NOTIFICATIONS_KEY:-development-notifications-internal-key-2026}
+      Integrations__InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:-development-integrations-internal-key-2026}
+      InternalApi__Key: ${DELIVERYOPS_NOTIFICATIONS_KEY:-development-notifications-internal-key-2026}
+      InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:-development-integrations-internal-key-2026}
+      CoreApi__InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:-development-integrations-internal-key-2026}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  core-api:
+    profiles: ["application"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Core/DeliveryOps.Core.Api/DeliveryOps.Core.Api.csproj
+        SERVICE_DLL: DeliveryOps.Core.Api.dll
+    environment:
+      <<: *api-environment
+      Notifications__BaseUrl: http://notifications-api:8080/
+      Integrations__BaseUrl: http://integrations-api:8080/
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:-http://localhost:5173}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:-http://localhost:8081}
+      OrderPii__KeyRingPath: /app/keys/core
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:5100:8080"
+    volumes:
+      - deliveryops-core-keys:/app/keys/core
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      notifications-api:
+        condition: service_healthy
+      integrations-api:
+        condition: service_healthy
+    healthcheck: &api-healthcheck
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  auth-api:
+    profiles: ["application"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Auth/DeliveryOps.Auth.Api/DeliveryOps.Auth.Api.csproj
+        SERVICE_DLL: DeliveryOps.Auth.Api.dll
+    environment:
+      <<: *api-environment
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:-http://localhost:5173}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:-http://localhost:8081}
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:5200:8080"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck: *api-healthcheck
+    restart: unless-stopped
+
+  notifications-api:
+    profiles: ["application"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Notifications/DeliveryOps.Notifications.Api/DeliveryOps.Notifications.Api.csproj
+        SERVICE_DLL: DeliveryOps.Notifications.Api.dll
+    environment:
+      <<: *api-environment
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:-http://localhost:5173}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:-http://localhost:8081}
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:5300:8080"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck: *api-healthcheck
+    restart: unless-stopped
+
+  integrations-api:
+    profiles: ["application"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Integrations/DeliveryOps.Integrations.Api/DeliveryOps.Integrations.Api.csproj
+        SERVICE_DLL: DeliveryOps.Integrations.Api.dll
+    environment:
+      <<: *api-environment
+      CoreApi__BaseUrl: http://core-api:8080/
+      DataProtection__KeyRingPath: /app/keys/integrations
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:-http://localhost:5173}
+    ports:
+      - "${DELIVERYOPS_BIND_HOST:-127.0.0.1}:5400:8080"
+    volumes:
+      - deliveryops-integrations-keys:/app/keys/integrations
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck: *api-healthcheck
+    restart: unless-stopped
+
+volumes:
+  deliveryops-postgres:
+  deliveryops-redis:
+  deliveryops-rabbitmq:
+  deliveryops-core-keys:
+  deliveryops-integrations-keys:

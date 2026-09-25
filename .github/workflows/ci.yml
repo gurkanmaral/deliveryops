@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: backend/global.json
+      - run: dotnet restore backend/DeliveryOps.sln
+      - run: dotnet build backend/DeliveryOps.sln --configuration Release --no-restore --nologo
+      - run: dotnet test backend/DeliveryOps.sln --configuration Release --no-build --nologo
+      - run: dotnet list backend/DeliveryOps.sln package --vulnerable --include-transitive
+
+  admin-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/admin-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/admin-web/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+      - run: npm run lint
+      - run: npm run build
+
+  courier-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/courier-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/courier-mobile/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npx expo install --check
+      - run: npx expo-doctor
+      - run: npm run typecheck
+      - run: npm run lint
+
+  pos-bridge:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore apps/pos-bridge/DeliveryOps.PosBridge.sln
+      - run: dotnet build apps/pos-bridge/DeliveryOps.PosBridge.sln --configuration Release --no-restore --nologo
+      - run: dotnet test apps/pos-bridge/tests/DeliveryOps.PosBridge.Core.Tests/DeliveryOps.PosBridge.Core.Tests.csproj --configuration Release --no-build --nologo
+      - run: dotnet list apps/pos-bridge/DeliveryOps.PosBridge.sln package --vulnerable --include-transitive
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f compose.yml config -q
+      - run: docker compose --env-file .env.production.example -f compose.yml -f compose.production.yml config -q

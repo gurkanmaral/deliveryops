@@ -1,0 +1,40 @@
+# JavaScript
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+!.env*.example
+test-results/
+playwright-report/
+blob-report/
+playwright/.auth/
+coverage/
+*.log
+
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+
+# IDE / OS
+.idea/
+.DS_Store
+
+# Generated packages and local test output
+artifacts/
+output/
+outputs/
+tmp/
+
+# Native signing material
+*.jks
+*.keystore
+*.p8
+*.p12
+*.pem
+*.mobileprovision
+
+# Local infrastructure
+.data/

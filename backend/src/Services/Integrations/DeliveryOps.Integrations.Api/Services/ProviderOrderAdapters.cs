@@ -1,0 +1,364 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using DeliveryOps.Integrations.Api.Domain;
+
+namespace DeliveryOps.Integrations.Api.Services;
+
+public sealed record AdaptedOrder(string ExternalEventId, string EventType,
+    InboundOrderRequest Order, string NormalizedPayload, string PayloadHash);
+
+public interface IOrderProviderAdapter
+{
+    bool CanHandle(IntegrationProvider provider, string adapterVersion);
+    AdaptedOrder Adapt(string rawPayload);
+}
+
+public sealed class CanonicalV1OrderAdapter : IOrderProviderAdapter
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+        { PropertyNameCaseInsensitive = true };
+
+    public bool CanHandle(IntegrationProvider provider, string adapterVersion) =>
+        string.Equals(adapterVersion, "canonical-v1", StringComparison.OrdinalIgnoreCase);
+
+    public AdaptedOrder Adapt(string rawPayload)
+    {
+        CanonicalOrderEnvelope? envelope;
+        try { envelope = JsonSerializer.Deserialize<CanonicalOrderEnvelope>(rawPayload, JsonOptions); }
+        catch (JsonException exception) { throw new ProviderPayloadException("Webhook JSON formatı geçersiz.", exception); }
+        if (envelope is null) throw new ProviderPayloadException("Webhook gövdesi boş olamaz.");
+        ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(envelope.DeliveryLatitude,
+            envelope.DeliveryLongitude, "canonical");
+        InboundOrderRequest order = new(envelope.ExternalOrderId, envelope.CustomerName,
+            envelope.CustomerPhone, envelope.DeliveryAddress, envelope.TotalAmount, coordinates.Latitude,
+            coordinates.Longitude, ProviderPayload.NormalizeOptional(envelope.DeliveryInstructions),
+            envelope.DeliveryFulfillment);
+        ProviderPayload.ValidateOrder(order);
+        string eventId = string.IsNullOrWhiteSpace(envelope.EventId) ? order.ExternalOrderId : envelope.EventId.Trim();
+        string eventType = string.IsNullOrWhiteSpace(envelope.EventType) ? "order.created" : envelope.EventType.Trim();
+        return ProviderPayload.Complete(rawPayload, eventId, eventType, order);
+    }
+
+    private sealed record CanonicalOrderEnvelope(string? EventId, string? EventType, string ExternalOrderId,
+        string CustomerName, string CustomerPhone, string DeliveryAddress, decimal TotalAmount,
+        double? DeliveryLatitude, double? DeliveryLongitude, string? DeliveryInstructions,
+        ProviderDeliveryFulfillment DeliveryFulfillment = ProviderDeliveryFulfillment.MerchantCourier);
+}
+
+public sealed class YemeksepetiPartnerV2OrderAdapter : IOrderProviderAdapter
+{
+    public bool CanHandle(IntegrationProvider provider, string adapterVersion) =>
+        provider == IntegrationProvider.Yemeksepeti &&
+        string.Equals(adapterVersion, "yemeksepeti-partner-v2", StringComparison.OrdinalIgnoreCase);
+
+    public AdaptedOrder Adapt(string rawPayload)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(rawPayload);
+            JsonElement root = document.RootElement;
+            string orderId = ProviderPayload.RequiredString(root, "order_id", "Yemeksepeti");
+            string status = ProviderPayload.RequiredString(root, "status", "Yemeksepeti").ToUpperInvariant();
+            if (status is not ("RECEIVED" or "READY_FOR_PICKUP" or "DISPATCHED" or "CANCELLED" or "DELIVERED"))
+                throw new ProviderPayloadException($"Desteklenmeyen Yemeksepeti sipariş durumu: {status}.");
+            JsonElement customer = ProviderPayload.RequiredObject(root, "customer", "Yemeksepeti");
+            string customerName = $"{ProviderPayload.OptionalString(customer, "first_name")} {ProviderPayload.OptionalString(customer, "last_name")}".Trim();
+            if (string.IsNullOrWhiteSpace(customerName)) customerName = "Yemeksepeti Müşterisi";
+            string phone = ProviderPayload.OptionalString(customer, "phone_number");
+            if (string.IsNullOrWhiteSpace(phone)) phone = "Yemeksepeti maskeli telefon";
+            string orderType = ProviderPayload.OptionalString(root, "order_type");
+            JsonElement? delivery = ProviderPayload.OptionalObject(customer, "delivery_address");
+            string address = string.Equals(orderType, "PICKUP", StringComparison.OrdinalIgnoreCase)
+                ? "Yemeksepeti mağazadan teslim" : BuildAddress(delivery);
+            ProviderCoordinates coordinates = delivery.HasValue
+                ? ProviderPayload.ReadCoordinates(delivery.Value, "latitude", "longitude", "Yemeksepeti")
+                : default;
+            string? instructions = delivery.HasValue
+                ? ProviderPayload.NormalizeOptional(ProviderPayload.OptionalString(delivery.Value, "instructions"))
+                : null;
+            JsonElement payment = ProviderPayload.RequiredObject(root, "payment", "Yemeksepeti");
+            decimal total = ProviderPayload.RequiredDecimal(payment, "order_total", "Yemeksepeti");
+            InboundOrderRequest order = new(orderId, customerName, phone, address, total,
+                coordinates.Latitude, coordinates.Longitude, instructions,
+                ResolveYemeksepetiFulfillment(root, orderType));
+            ProviderPayload.ValidateOrder(order);
+            string updatedAt = root.TryGetProperty("sys", out JsonElement sys)
+                ? ProviderPayload.OptionalString(sys, "updated_at") : string.Empty;
+            string payloadHash = ProviderPayload.Hash(rawPayload);
+            string eventId = string.IsNullOrWhiteSpace(updatedAt)
+                ? $"{orderId}:{status}:{payloadHash[..12]}" : $"{orderId}:{status}:{updatedAt}";
+            return ProviderPayload.Complete(rawPayload, eventId, $"order.{status.ToLowerInvariant()}", order, payloadHash);
+        }
+        catch (JsonException exception)
+        {
+            throw new ProviderPayloadException("Yemeksepeti webhook JSON formatı geçersiz.", exception);
+        }
+    }
+
+    private static string BuildAddress(JsonElement? address)
+    {
+        if (!address.HasValue) return "Yemeksepeti teslimat adresi";
+        string formatted = ProviderPayload.OptionalString(address.Value, "formattedAddress");
+        if (!string.IsNullOrWhiteSpace(formatted)) return formatted;
+        string[] parts = ["street", "number", "building", "apartment", "floor", "suburb", "city"];
+        string result = string.Join(", ", parts.Select(x => ProviderPayload.OptionalString(address.Value, x))
+            .Where(x => !string.IsNullOrWhiteSpace(x)));
+        return string.IsNullOrWhiteSpace(result) ? "Yemeksepeti teslimat adresi" : result;
+    }
+
+    private static ProviderDeliveryFulfillment ResolveYemeksepetiFulfillment(JsonElement root,
+        string orderType)
+    {
+        if (string.Equals(orderType, "PICKUP", StringComparison.OrdinalIgnoreCase))
+            return ProviderDeliveryFulfillment.CustomerPickup;
+        string transportType = ProviderPayload.OptionalString(root, "transport_type");
+        return string.Equals(transportType, "LOGISTICS_DELIVERY", StringComparison.OrdinalIgnoreCase)
+            ? ProviderDeliveryFulfillment.ProviderCourier
+            : ProviderDeliveryFulfillment.MerchantCourier;
+    }
+}
+
+public sealed class GetirFoodV1OrderAdapter : IOrderProviderAdapter
+{
+    public bool CanHandle(IntegrationProvider provider, string adapterVersion) =>
+        provider == IntegrationProvider.Getir &&
+        string.Equals(adapterVersion, "getir-food-v1", StringComparison.OrdinalIgnoreCase);
+
+    public AdaptedOrder Adapt(string rawPayload)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(rawPayload);
+            JsonElement root = document.RootElement;
+            if (root.TryGetProperty("foodOrder", out JsonElement wrapped) && wrapped.ValueKind == JsonValueKind.Object)
+                root = wrapped;
+            string orderId = ProviderPayload.RequiredString(root, "id", "Getir");
+            JsonElement client = ProviderPayload.RequiredObject(root, "client", "Getir");
+            string name = ProviderPayload.OptionalString(client, "name");
+            if (string.IsNullOrWhiteSpace(name)) name = "Getir Müşterisi";
+            string phone = ProviderPayload.FirstString(client, "clientUnmaskedPhoneNumber", "contactPhoneNumber", "clientPhoneNumber");
+            if (string.IsNullOrWhiteSpace(phone)) phone = "Getir maskeli telefon";
+            JsonElement addressObject = ProviderPayload.RequiredObject(client, "deliveryAddress", "Getir");
+            string address = ProviderPayload.OptionalString(addressObject, "address");
+            if (string.IsNullOrWhiteSpace(address))
+                address = string.Join(", ", new[] { "district", "city" }.Select(x => ProviderPayload.OptionalString(addressObject, x))
+                    .Where(x => !string.IsNullOrWhiteSpace(x)));
+            if (string.IsNullOrWhiteSpace(address)) address = "Getir teslimat adresi";
+            JsonElement location = ProviderPayload.RequiredObject(client, "location", "Getir");
+            ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(location, "lat", "lon", "Getir");
+            string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
+                { ProviderPayload.OptionalString(addressObject, "description"), ProviderPayload.OptionalString(root, "clientNote") }
+                .Where(x => !string.IsNullOrWhiteSpace(x))));
+            decimal total = ProviderPayload.OptionalDecimal(root, "totalDiscountedPrice")
+                ?? ProviderPayload.RequiredDecimal(root, "totalPrice", "Getir");
+            InboundOrderRequest order = new(orderId, name, phone, address, total,
+                coordinates.Latitude, coordinates.Longitude, instructions,
+                ProviderPayload.OptionalObject(root, "courier").HasValue
+                    ? ProviderDeliveryFulfillment.ProviderCourier
+                    : ProviderDeliveryFulfillment.MerchantCourier);
+            ProviderPayload.ValidateOrder(order);
+            string status = ProviderPayload.OptionalStringOrNumber(root, "status");
+            string checkoutDate = ProviderPayload.OptionalString(root, "checkoutDate");
+            string hash = ProviderPayload.Hash(rawPayload);
+            string eventId = $"{orderId}:{(string.IsNullOrWhiteSpace(status) ? "created" : status)}:{(string.IsNullOrWhiteSpace(checkoutDate) ? hash[..12] : checkoutDate)}";
+            return ProviderPayload.Complete(rawPayload, eventId, "order.created", order, hash);
+        }
+        catch (JsonException exception)
+        {
+            throw new ProviderPayloadException("Getir webhook JSON formatı geçersiz.", exception);
+        }
+    }
+}
+
+public sealed class TrendyolWebhookV1OrderAdapter : IOrderProviderAdapter
+{
+    public bool CanHandle(IntegrationProvider provider, string adapterVersion) =>
+        provider == IntegrationProvider.Trendyol &&
+        string.Equals(adapterVersion, "trendyol-webhook-v1", StringComparison.OrdinalIgnoreCase);
+
+    public AdaptedOrder Adapt(string rawPayload)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(rawPayload);
+            JsonElement root = document.RootElement;
+            JsonElement package = root;
+            if (root.TryGetProperty("content", out JsonElement content))
+            {
+                if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+                    throw new ProviderPayloadException("Trendyol Go webhook içeriği tam olarak bir sipariş paketi içermelidir.");
+                package = content[0];
+            }
+            string packageId = ProviderPayload.OptionalStringOrNumber(package, "id");
+            string orderNumber = ProviderPayload.RequiredStringOrNumber(package, "orderNumber", "Trendyol Go");
+            string externalId = string.IsNullOrWhiteSpace(packageId) ? orderNumber : $"{orderNumber}-{packageId}";
+            string status = ProviderPayload.FirstString(package, "packageStatus", "status");
+            if (string.IsNullOrWhiteSpace(status)) status = "Delivered";
+            bool isCreated = string.Equals(status, "Created", StringComparison.OrdinalIgnoreCase);
+            InboundOrderRequest order = isCreated
+                ? BuildTrendyolCreatedOrder(package, externalId)
+                : new InboundOrderRequest(externalId, "Trendyol Go Müşterisi", "Trendyol Go maskeli telefon",
+                    "Trendyol Go teslimat adresi", 0);
+            string modified = ProviderPayload.FirstStringOrNumber(package, "timestamp", "lastModifiedDate", "packageModificationDate");
+            string hash = ProviderPayload.Hash(rawPayload);
+            string eventId = $"{externalId}:{status.ToUpperInvariant()}:{(string.IsNullOrWhiteSpace(modified) ? hash[..12] : modified)}";
+            return ProviderPayload.Complete(rawPayload, eventId, $"order.{status.ToLowerInvariant()}", order, hash);
+        }
+        catch (JsonException exception)
+        {
+            throw new ProviderPayloadException("Trendyol webhook JSON formatı geçersiz.", exception);
+        }
+    }
+
+    private static InboundOrderRequest BuildTrendyolCreatedOrder(JsonElement package, string externalId)
+    {
+        JsonElement addressObject = ProviderPayload.OptionalObject(package, "address")
+            ?? ProviderPayload.RequiredObject(package, "shipmentAddress", "Trendyol Go");
+        JsonElement? customer = ProviderPayload.OptionalObject(package, "customer");
+        string name = $"{ProviderPayload.OptionalString(addressObject, "firstName")} {ProviderPayload.OptionalString(addressObject, "lastName")}".Trim();
+        if (string.IsNullOrWhiteSpace(name) && customer.HasValue)
+            name = $"{ProviderPayload.OptionalString(customer.Value, "firstName")} {ProviderPayload.OptionalString(customer.Value, "lastName")}".Trim();
+        if (string.IsNullOrWhiteSpace(name)) name = "Trendyol Go Müşterisi";
+        string phone = ProviderPayload.OptionalString(addressObject, "phone");
+        if (string.IsNullOrWhiteSpace(phone)) phone = "Trendyol Go maskeli telefon";
+        string address = ProviderPayload.FirstString(addressObject, "address1", "fullAddress", "shortAddress");
+        if (string.IsNullOrWhiteSpace(address)) address = "Trendyol Go teslimat adresi";
+        ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(addressObject,
+            "latitude", "longitude", "Trendyol Go");
+        string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
+        {
+            ProviderPayload.OptionalString(addressObject, "addressDescription"),
+            ProviderPayload.OptionalString(package, "customerNote"),
+            customer.HasValue ? ProviderPayload.OptionalString(customer.Value, "note") : string.Empty
+        }.Where(x => !string.IsNullOrWhiteSpace(x))));
+        decimal total = ProviderPayload.OptionalDecimal(package, "totalPrice")
+            ?? ProviderPayload.OptionalDecimal(package, "packageGrossAmount") ?? 0;
+        bool pickup = ProviderPayload.OptionalBoolean(package, "storePickupSelected") == true;
+        string deliveryType = ProviderPayload.FirstString(package, "deliveryType", "deliveryModel");
+        ProviderDeliveryFulfillment fulfillment = pickup
+            ? ProviderDeliveryFulfillment.CustomerPickup
+            : string.Equals(deliveryType, "GO", StringComparison.OrdinalIgnoreCase)
+                ? ProviderDeliveryFulfillment.ProviderCourier
+                : ProviderDeliveryFulfillment.MerchantCourier;
+        InboundOrderRequest order = new(externalId, name, phone, address, total,
+            coordinates.Latitude, coordinates.Longitude, instructions, fulfillment);
+        ProviderPayload.ValidateOrder(order);
+        return order;
+    }
+}
+
+internal readonly record struct ProviderCoordinates(double? Latitude, double? Longitude);
+
+internal static class ProviderPayload
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public static AdaptedOrder Complete(string rawPayload, string eventId, string eventType,
+        InboundOrderRequest order, string? hash = null) => new(eventId, eventType, order,
+        JsonSerializer.Serialize(order, JsonOptions), hash ?? Hash(rawPayload));
+
+    public static string Hash(string rawPayload) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawPayload))).ToLowerInvariant();
+
+    public static void ValidateOrder(InboundOrderRequest order)
+    {
+        if (string.IsNullOrWhiteSpace(order.ExternalOrderId) || string.IsNullOrWhiteSpace(order.CustomerName) ||
+            string.IsNullOrWhiteSpace(order.CustomerPhone) || string.IsNullOrWhiteSpace(order.DeliveryAddress) ||
+            order.TotalAmount < 0)
+            throw new ProviderPayloadException("Sipariş numarası, müşteri, telefon, adres ve geçerli tutar zorunludur.");
+    }
+
+    public static ProviderCoordinates ReadCoordinates(JsonElement element, string latitudeName,
+        string longitudeName, string provider) => ReadCoordinates(OptionalDouble(element, latitudeName),
+        OptionalDouble(element, longitudeName), provider);
+
+    public static ProviderCoordinates ReadCoordinates(double? latitude, double? longitude, string provider)
+    {
+        if (!latitude.HasValue && !longitude.HasValue) return default;
+        if (latitude.HasValue != longitude.HasValue || !double.IsFinite(latitude!.Value) ||
+            !double.IsFinite(longitude!.Value) || latitude is < -90 or > 90 || longitude is < -180 or > 180 ||
+            latitude == 0 && longitude == 0)
+            throw new ProviderPayloadException($"{provider} teslimat koordinatları geçersiz.");
+        return new ProviderCoordinates(latitude, longitude);
+    }
+
+    public static JsonElement RequiredObject(JsonElement element, string name, string provider) =>
+        OptionalObject(element, name) ?? throw new ProviderPayloadException($"{provider} {name} alanı zorunludur.");
+
+    public static JsonElement? OptionalObject(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Object ? value : null;
+
+    public static string RequiredString(JsonElement element, string name, string provider)
+    {
+        string value = OptionalString(element, name);
+        return !string.IsNullOrWhiteSpace(value) ? value
+            : throw new ProviderPayloadException($"{provider} {name} alanı zorunludur.");
+    }
+
+    public static string RequiredStringOrNumber(JsonElement element, string name, string provider)
+    {
+        string value = OptionalStringOrNumber(element, name);
+        return !string.IsNullOrWhiteSpace(value) ? value
+            : throw new ProviderPayloadException($"{provider} {name} alanı zorunludur.");
+    }
+
+    public static string OptionalString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()?.Trim() ?? string.Empty : string.Empty;
+
+    public static string OptionalStringOrNumber(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out JsonElement value)) return string.Empty;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString()?.Trim() ?? string.Empty,
+            JsonValueKind.Number => value.GetRawText(),
+            _ => string.Empty
+        };
+    }
+
+    public static string FirstString(JsonElement element, params string[] names) =>
+        names.Select(name => OptionalString(element, name)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    public static string FirstStringOrNumber(JsonElement element, params string[] names) =>
+        names.Select(name => OptionalStringOrNumber(element, name)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    public static bool? OptionalBoolean(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean() : null;
+
+    public static decimal RequiredDecimal(JsonElement element, string name, string provider) =>
+        OptionalDecimal(element, name) is { } value && value >= 0 ? value
+            : throw new ProviderPayloadException($"{provider} {name} alanı geçersiz.");
+
+    public static decimal? OptionalDecimal(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out JsonElement value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out decimal number)) return number;
+        return value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(),
+            NumberStyles.Float, CultureInfo.InvariantCulture, out number) ? number : null;
+    }
+
+    private static double? OptionalDouble(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out JsonElement value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out double number)) return number;
+        return value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(),
+            NumberStyles.Float, CultureInfo.InvariantCulture, out number) ? number : null;
+    }
+
+    public static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}
+
+public sealed class ProviderAdapterRegistry(IEnumerable<IOrderProviderAdapter> adapters)
+{
+    public IOrderProviderAdapter Resolve(IntegrationProvider provider, string adapterVersion) =>
+        adapters.FirstOrDefault(x => x.CanHandle(provider, adapterVersion)) ??
+        throw new ProviderPayloadException($"{provider} için '{adapterVersion}' adaptörü kayıtlı değil.");
+}
+
+public sealed class ProviderPayloadException(string message, Exception? innerException = null)
+    : Exception(message, innerException);

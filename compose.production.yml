@@ -1,0 +1,52 @@
+x-production-environment: &production-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  ConnectionStrings__CoreDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:?Set DELIVERYOPS_DB_PASSWORD}
+  ConnectionStrings__AuthDatabase: Host=postgres;Port=5432;Database=deliveryops_auth;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:?Set DELIVERYOPS_DB_PASSWORD}
+  ConnectionStrings__NotificationsDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:?Set DELIVERYOPS_DB_PASSWORD}
+  ConnectionStrings__IntegrationsDatabase: Host=postgres;Port=5432;Database=deliveryops_core;Username=deliveryops;Password=${DELIVERYOPS_DB_PASSWORD:?Set DELIVERYOPS_DB_PASSWORD}
+  Jwt__PublicKeyPemBase64: ${DELIVERYOPS_JWT_PUBLIC_KEY_BASE64:?Set DELIVERYOPS_JWT_PUBLIC_KEY_BASE64}
+  Jwt__SigningKey: ""
+  OrderPii__SearchKey: ${DELIVERYOPS_ORDER_SEARCH_KEY:?Set DELIVERYOPS_ORDER_SEARCH_KEY}
+  Notifications__InternalApiKey: ${DELIVERYOPS_NOTIFICATIONS_KEY:?Set DELIVERYOPS_NOTIFICATIONS_KEY}
+  Integrations__InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:?Set DELIVERYOPS_INTEGRATIONS_KEY}
+  InternalApi__Key: ${DELIVERYOPS_NOTIFICATIONS_KEY:?Set DELIVERYOPS_NOTIFICATIONS_KEY}
+  InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:?Set DELIVERYOPS_INTEGRATIONS_KEY}
+  CoreApi__InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:?Set DELIVERYOPS_INTEGRATIONS_KEY}
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${DELIVERYOPS_DB_PASSWORD:?Set DELIVERYOPS_DB_PASSWORD}
+
+  rabbitmq:
+    environment:
+      RABBITMQ_DEFAULT_PASS: ${DELIVERYOPS_RABBITMQ_PASSWORD:?Set DELIVERYOPS_RABBITMQ_PASSWORD}
+
+  migrations:
+    environment:
+      <<: *production-environment
+      Jwt__PrivateKeyPemBase64: ${DELIVERYOPS_JWT_PRIVATE_KEY_BASE64:?Set DELIVERYOPS_JWT_PRIVATE_KEY_BASE64}
+
+  core-api:
+    environment:
+      <<: *production-environment
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:?Set DELIVERYOPS_ADMIN_ORIGIN}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:?Set DELIVERYOPS_MOBILE_ORIGIN}
+
+  auth-api:
+    environment:
+      <<: *production-environment
+      Jwt__PrivateKeyPemBase64: ${DELIVERYOPS_JWT_PRIVATE_KEY_BASE64:?Set DELIVERYOPS_JWT_PRIVATE_KEY_BASE64}
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:?Set DELIVERYOPS_ADMIN_ORIGIN}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:?Set DELIVERYOPS_MOBILE_ORIGIN}
+
+  notifications-api:
+    environment:
+      <<: *production-environment
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:?Set DELIVERYOPS_ADMIN_ORIGIN}
+      Cors__AllowedOrigins__1: ${DELIVERYOPS_MOBILE_ORIGIN:?Set DELIVERYOPS_MOBILE_ORIGIN}
+
+  integrations-api:
+    environment:
+      <<: *production-environment
+      Cors__AllowedOrigins__0: ${DELIVERYOPS_ADMIN_ORIGIN:?Set DELIVERYOPS_ADMIN_ORIGIN}
