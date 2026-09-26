@@ -417,6 +417,13 @@ tbody tr:hover { background: #fcfbf9; }
 .settings-business-picker select { max-width: 360px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .settings-card { align-self: start; }
+.settings-card--route { grid-column: 1 / -1; }
+.route-rule { min-width: 150px; padding: 8px 12px; display: grid; gap: 1px; text-align: right; background: var(--accent-soft); border-radius: var(--r-sm); }
+.route-rule strong { color: var(--accent); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.route-rule span { color: var(--muted); font-size: 11px; }
+.route-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+.route-presets button { padding: 7px 10px; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 12px; font-weight: 600; }
+.route-presets button:hover { color: var(--accent); border-color: var(--accent); }
 .setting-toggle { width: 100%; min-height: 66px; padding: 13px 20px; display: flex; align-items: center; justify-content: space-between; gap: 20px; text-align: left; color: inherit; background: var(--surface); border: 0; border-top: 1px solid var(--line); }
 .setting-toggle:hover { background: var(--surface-2); }
 .setting-toggle > span { display: grid; gap: 3px; }

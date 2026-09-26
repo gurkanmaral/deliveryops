@@ -30,19 +30,36 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
             .Select(group => new { CourierId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.CourierId, x => x.Count, cancellationToken);
 
-        Dictionary<Guid, double?> clusterDistances = courierIds.ToDictionary(x => x, _ => (double?)null);
-        if (settings.PreferDeliveryClusters && order.DeliveryLatitude.HasValue && order.DeliveryLongitude.HasValue)
+        Dictionary<Guid, (double? DistanceKm, double? BearingDifferenceDegrees)> clusterMetrics = courierIds
+            .ToDictionary(x => x, _ => ((double?)null, (double?)null));
+        if (settings.PreferDeliveryClusters && order.DeliveryLatitude.HasValue && order.DeliveryLongitude.HasValue &&
+            order.DeliveryLocationAccuracy == DeliveryLocationAccuracy.Exact && branch.Latitude.HasValue &&
+            branch.Longitude.HasValue)
         {
             var activeDeliveries = await context.Orders.AsNoTracking()
                 .Where(x => x.Id != order.Id && x.CourierId.HasValue && courierIds.Contains(x.CourierId.Value) &&
                             ActiveOrderStatuses.Contains(x.Status) && x.DeliveryLatitude.HasValue &&
-                            x.DeliveryLongitude.HasValue)
+                            x.DeliveryLongitude.HasValue && x.DeliveryLocationAccuracy == DeliveryLocationAccuracy.Exact)
                 .Select(x => new { CourierId = x.CourierId!.Value, x.DeliveryLatitude, x.DeliveryLongitude })
                 .ToListAsync(cancellationToken);
             foreach (var group in activeDeliveries.GroupBy(x => x.CourierId))
-                clusterDistances[group.Key] = group.Select(x => CourierAssignmentRanker.CalculateDistanceKm(
-                        x.DeliveryLatitude, x.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude))
-                    .Where(x => x.HasValue).Select(x => x!.Value).DefaultIfEmpty(double.MaxValue).Min();
+            {
+                var bestMatch = group.Select(activeOrder => new
+                    {
+                        DistanceKm = CourierAssignmentRanker.CalculateDistanceKm(activeOrder.DeliveryLatitude,
+                            activeOrder.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude),
+                        BearingDifferenceDegrees = CourierAssignmentRanker.CalculateBearingDifferenceDegrees(
+                            branch.Latitude, branch.Longitude, activeOrder.DeliveryLatitude,
+                            activeOrder.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude)
+                    })
+                    .Where(match => match.DistanceKm.HasValue && match.BearingDifferenceDegrees.HasValue)
+                    .OrderBy(match => match.DistanceKm!.Value / settings.DeliveryClusterRadiusKm +
+                                      match.BearingDifferenceDegrees!.Value /
+                                      settings.DeliveryClusterMaxBearingDegrees)
+                    .FirstOrDefault();
+                if (bestMatch is not null)
+                    clusterMetrics[group.Key] = (bestMatch.DistanceKm, bestMatch.BearingDifferenceDegrees);
+            }
         }
 
         var latestTimes = context.CourierLocations.AsNoTracking()
@@ -61,14 +78,16 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
         List<CourierAssignmentCandidate> remaining = couriers.Select(courier =>
         {
             latestLocations.TryGetValue(courier.Id, out CourierLocation? location);
+            var clusterMetric = clusterMetrics.GetValueOrDefault(courier.Id);
             return new CourierAssignmentCandidate(courier.Id, courier.BranchId, activeCounts.GetValueOrDefault(courier.Id),
                 location?.Position.Y, location?.Position.X, location?.RecordedAtUtc,
-                clusterDistances.GetValueOrDefault(courier.Id));
+                clusterMetric.DistanceKm, clusterMetric.BearingDifferenceDegrees);
         }).ToList();
         CourierAssignmentCriteria criteria = new(order.BranchId, branch.Latitude, branch.Longitude,
             settings.PreferBranchCouriers, settings.MaxActiveOrdersPerCourier, settings.RequireFreshLocation,
             settings.LocationFreshnessMinutes, settings.AssignmentRadiusKm, timeProvider.GetUtcNow(),
-            settings.PreferDeliveryClusters, settings.DeliveryClusterRadiusKm);
+            settings.PreferDeliveryClusters, settings.DeliveryClusterRadiusKm,
+            settings.DeliveryClusterMaxBearingDegrees);
 
         List<CourierSuggestionResponse> result = [];
         while (remaining.Count > 0)
@@ -85,6 +104,9 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
                 selected.NearestActiveDeliveryDistanceKm.HasValue &&
                 selected.NearestActiveDeliveryDistanceKm.Value != double.MaxValue
                     ? Math.Round(selected.NearestActiveDeliveryDistanceKm.Value, 2)
+                    : null,
+                selected.NearestActiveDeliveryBearingDifferenceDegrees.HasValue
+                    ? Math.Round(selected.NearestActiveDeliveryBearingDifferenceDegrees.Value, 1)
                     : null));
             remaining.Remove(selected);
         }

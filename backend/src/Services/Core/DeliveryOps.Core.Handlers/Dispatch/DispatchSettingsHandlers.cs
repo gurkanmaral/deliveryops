@@ -26,11 +26,12 @@ public sealed class GetDispatchSettingsHandler(ICoreDbContext context, IRequestC
     }
 
     internal static DispatchSettingsResponse Map(BusinessDispatchSettings? settings, Guid businessId) => settings is null
-        ? new DispatchSettingsResponse(businessId, false, false, true, true, 2, false, 5, null, true, 2)
+        ? new DispatchSettingsResponse(businessId, false, false, true, true, 2, false, 5, null, true, 2, 45)
         : new DispatchSettingsResponse(settings.BusinessId, settings.AutoConfirmOrders, settings.AutoAssignCouriers,
             settings.AllowCourierSelfClaim, settings.PreferBranchCouriers, settings.MaxActiveOrdersPerCourier,
             settings.RequireFreshLocation, settings.LocationFreshnessMinutes, settings.AssignmentRadiusKm,
-            settings.PreferDeliveryClusters, settings.DeliveryClusterRadiusKm);
+            settings.PreferDeliveryClusters, settings.DeliveryClusterRadiusKm,
+            settings.DeliveryClusterMaxBearingDegrees);
 }
 
 public sealed class UpdateDispatchSettingsHandler(ICoreDbContext context, IRequestContext requestContext)
@@ -58,7 +59,7 @@ public sealed class UpdateDispatchSettingsHandler(ICoreDbContext context, IReque
             settings.Update(request.AutoConfirmOrders, request.AutoAssignCouriers, request.AllowCourierSelfClaim,
                 request.PreferBranchCouriers, request.MaxActiveOrdersPerCourier, request.RequireFreshLocation,
                 request.LocationFreshnessMinutes, request.AssignmentRadiusKm, request.PreferDeliveryClusters,
-                request.DeliveryClusterRadiusKm);
+                request.DeliveryClusterRadiusKm, request.DeliveryClusterMaxBearingDegrees);
         }
         catch (ArgumentOutOfRangeException exception)
         {

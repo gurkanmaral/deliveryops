@@ -9,7 +9,7 @@ public sealed class BusinessDispatchSettingsTests
     {
         BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
 
-        settings.Update(false, true, true, true, 3, false, 5, null, true, 2);
+        settings.Update(false, true, true, true, 3, false, 5, null, true, 2, 45);
 
         Assert.True(settings.AutoConfirmOrders);
         Assert.True(settings.AutoAssignCouriers);
@@ -24,7 +24,7 @@ public sealed class BusinessDispatchSettingsTests
         BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            settings.Update(false, false, true, true, capacity, false, 5, null, true, 2));
+            settings.Update(false, false, true, true, capacity, false, 5, null, true, 2, 45));
     }
 
     [Theory]
@@ -35,6 +35,17 @@ public sealed class BusinessDispatchSettingsTests
         BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            settings.Update(false, false, true, true, 2, false, 5, null, true, radiusKm));
+            settings.Update(false, false, true, true, 2, false, 5, null, true, radiusKm, 45));
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(181)]
+    public void Update_RejectsInvalidDeliveryClusterBearing(double bearingDegrees)
+    {
+        BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            settings.Update(false, false, true, true, 2, false, 5, null, true, 2, bearingDegrees));
     }
 }

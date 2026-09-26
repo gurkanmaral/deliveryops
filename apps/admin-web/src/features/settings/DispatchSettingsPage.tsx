@@ -18,13 +18,14 @@ interface DispatchSettings {
   assignmentRadiusKm?: number
   preferDeliveryClusters: boolean
   deliveryClusterRadiusKm: number
+  deliveryClusterMaxBearingDegrees: number
 }
 
 const initialSettings: DispatchSettings = {
   businessId: '', autoConfirmOrders: false, autoAssignCouriers: false,
   allowCourierSelfClaim: true, preferBranchCouriers: true, maxActiveOrdersPerCourier: 2,
   requireFreshLocation: false, locationFreshnessMinutes: 5,
-  preferDeliveryClusters: true, deliveryClusterRadiusKm: 2,
+  preferDeliveryClusters: true, deliveryClusterRadiusKm: 2, deliveryClusterMaxBearingDegrees: 45,
 }
 
 export function DispatchSettingsPage() {
@@ -42,7 +43,7 @@ export function DispatchSettingsPage() {
     queryFn: ({ signal }) => getJson<DispatchSettings>(`/api/v1/dispatch/settings?businessId=${businessId}`, signal),
   })
   const [form, setForm] = useState<DispatchSettings>(initialSettings)
-  useEffect(() => { if (settingsQuery.data) setForm(settingsQuery.data) }, [settingsQuery.data])
+  useEffect(() => { if (settingsQuery.data) setForm({ ...initialSettings, ...settingsQuery.data }) }, [settingsQuery.data])
 
   const save = useMutation({
     mutationFn: () => requestJson<DispatchSettings>('/api/v1/dispatch/settings', {
@@ -84,9 +85,22 @@ export function DispatchSettingsPage() {
           <SettingToggle checked={form.requireFreshLocation} title="Güncel konum zorunlu" description="Eski veya konumu olmayan kuryeleri aday listesinden çıkarır." onChange={() => toggle('requireFreshLocation')} compact />
           <label>Konum geçerlilik süresi (dk)<input type="number" min="1" max="120" value={form.locationFreshnessMinutes} onChange={event => setForm(current => ({ ...current, locationFreshnessMinutes: Number(event.target.value) }))} /></label>
           <label>Azami atama mesafesi (km)<input type="number" min="0.1" max="200" step="0.1" placeholder="Sınırsız" value={form.assignmentRadiusKm ?? ''} onChange={event => setForm(current => ({ ...current, assignmentRadiusKm: event.target.value ? Number(event.target.value) : undefined }))} /></label>
-          <SettingToggle checked={form.preferDeliveryClusters} title="Aynı bölge paketlerini grupla" description="Yakın teslimat adreslerini kapasitesi uygun olan aynı kuryede toplar." onChange={() => toggle('preferDeliveryClusters')} compact />
-          <label>Teslimat gruplama yarıçapı (km)<input type="number" min="0.1" max="25" step="0.1" value={form.deliveryClusterRadiusKm} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterRadiusKm: Number(event.target.value) }))} /></label>
-          <p className="settings-hint">Alım mesafesi kuryenin son konumu ile şube arasında, rota gruplaması ise aktif paketlerin teslimat koordinatları arasında hesaplanır. Koordinatı olmayan siparişler rota grubuna alınmaz.</p>
+          <p className="settings-hint">Alım mesafesi kuryenin son konumu ile siparişin alınacağı şube arasında hesaplanır.</p>
+        </div>
+      </article>
+
+      <article className="panel settings-card settings-card--route">
+        <div className="panel__heading"><div><h2>Rota gruplama</h2><p>Aynı yöne giden paketleri kontrollü biçimde aynı kuryede toplayın</p></div><div className="route-rule"><strong>{form.deliveryClusterRadiusKm.toFixed(1)} km</strong><span>en fazla {form.deliveryClusterMaxBearingDegrees}° yön farkı</span></div></div>
+        <div className="settings-fields">
+          <SettingToggle checked={form.preferDeliveryClusters} title="Aynı rota paketlerini grupla" description="Yalnızca doğrulanmış koordinatı olan ve aynı çıkış yönündeki teslimatları gruplar." onChange={() => toggle('preferDeliveryClusters')} compact />
+          <div className="route-presets" aria-label="Rota gruplama hazır ayarları">
+            <button type="button" onClick={() => setForm(current => ({ ...current, deliveryClusterRadiusKm: 1, deliveryClusterMaxBearingDegrees: 30 }))}>Sıkı · 1 km / 30°</button>
+            <button type="button" onClick={() => setForm(current => ({ ...current, deliveryClusterRadiusKm: 2, deliveryClusterMaxBearingDegrees: 45 }))}>Dengeli · 2 km / 45°</button>
+            <button type="button" onClick={() => setForm(current => ({ ...current, deliveryClusterRadiusKm: 4, deliveryClusterMaxBearingDegrees: 60 }))}>Geniş · 4 km / 60°</button>
+          </div>
+          <label>Teslimat yakınlık yarıçapı (km)<input type="number" min="0.1" max="25" step="0.1" value={form.deliveryClusterRadiusKm} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterRadiusKm: Number(event.target.value) }))} /></label>
+          <label>Azami yön farkı (derece)<input type="number" min="5" max="180" step="1" value={form.deliveryClusterMaxBearingDegrees} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterMaxBearingDegrees: Number(event.target.value) }))} /></label>
+          <p className="settings-hint">Bir eşleşme için hem kilometre hem yön şartı sağlanır. Yaklaşık veya eksik koordinatlar otomatik gruplamaya alınmaz; normal kapasite sıralamasıyla değerlendirilir.</p>
         </div>
       </article>
 

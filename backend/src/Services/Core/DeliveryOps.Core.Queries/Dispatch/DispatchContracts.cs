@@ -15,7 +15,8 @@ public sealed record DispatchSettingsResponse(
     int LocationFreshnessMinutes,
     double? AssignmentRadiusKm,
     bool PreferDeliveryClusters,
-    double DeliveryClusterRadiusKm);
+    double DeliveryClusterRadiusKm,
+    double DeliveryClusterMaxBearingDegrees);
 
 public sealed record GetDispatchSettingsQuery(Guid? BusinessId) : IRequest<Result<DispatchSettingsResponse>>;
 
@@ -30,7 +31,8 @@ public sealed record UpdateDispatchSettingsCommand(
     int LocationFreshnessMinutes,
     double? AssignmentRadiusKm,
     bool PreferDeliveryClusters,
-    double DeliveryClusterRadiusKm) : IRequest<Result<DispatchSettingsResponse>>;
+    double DeliveryClusterRadiusKm,
+    double DeliveryClusterMaxBearingDegrees) : IRequest<Result<DispatchSettingsResponse>>;
 
 public sealed record DispatchQueueItemResponse(
     Guid OrderId,
@@ -53,7 +55,8 @@ public sealed record CourierSuggestionResponse(
     int ActiveOrderCount,
     double? DistanceKm,
     DateTimeOffset? LocationRecordedAtUtc,
-    double? DeliveryClusterDistanceKm = null);
+    double? DeliveryClusterDistanceKm = null,
+    double? DeliveryClusterBearingDifferenceDegrees = null);
 
 public sealed record DispatchAttemptResponse(
     Guid Id,

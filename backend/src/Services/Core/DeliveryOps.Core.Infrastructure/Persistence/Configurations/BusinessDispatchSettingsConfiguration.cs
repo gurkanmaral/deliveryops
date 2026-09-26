@@ -13,6 +13,7 @@ internal sealed class BusinessDispatchSettingsConfiguration : IEntityTypeConfigu
         builder.HasIndex(x => x.BusinessId).IsUnique();
         builder.Property(x => x.PreferDeliveryClusters).HasDefaultValue(true);
         builder.Property(x => x.DeliveryClusterRadiusKm).HasDefaultValue(2d);
+        builder.Property(x => x.DeliveryClusterMaxBearingDegrees).HasDefaultValue(45d);
         builder.HasOne<Business>().WithOne().HasForeignKey<BusinessDispatchSettings>(x => x.BusinessId)
             .OnDelete(DeleteBehavior.Cascade);
     }

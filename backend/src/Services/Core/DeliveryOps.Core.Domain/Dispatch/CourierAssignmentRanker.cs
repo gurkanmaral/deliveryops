@@ -7,7 +7,8 @@ public sealed record CourierAssignmentCandidate(
     double? Latitude,
     double? Longitude,
     DateTimeOffset? LocationRecordedAtUtc,
-    double? NearestActiveDeliveryDistanceKm = null);
+    double? NearestActiveDeliveryDistanceKm = null,
+    double? NearestActiveDeliveryBearingDifferenceDegrees = null);
 
 public sealed record CourierAssignmentCriteria(
     Guid OrderBranchId,
@@ -20,7 +21,8 @@ public sealed record CourierAssignmentCriteria(
     double? AssignmentRadiusKm,
     DateTimeOffset Now,
     bool PreferDeliveryClusters = true,
-    double DeliveryClusterRadiusKm = 2);
+    double DeliveryClusterRadiusKm = 2,
+    double DeliveryClusterMaxBearingDegrees = 45);
 
 public static class CourierAssignmentRanker
 {
@@ -35,7 +37,7 @@ public static class CourierAssignmentRanker
             .OrderBy(candidate => criteria.PreferBranchCouriers && candidate.Value.BranchId != criteria.OrderBranchId ? 1 : 0)
             .ThenBy(candidate => IsDeliveryClusterMatch(candidate.Value, criteria) ? 0 : 1)
             .ThenBy(candidate => IsDeliveryClusterMatch(candidate.Value, criteria)
-                ? candidate.Value.NearestActiveDeliveryDistanceKm!.Value
+                ? CalculateClusterScore(candidate.Value, criteria)
                 : double.MaxValue)
             .ThenBy(candidate => candidate.Value.ActiveOrderCount)
             .ThenBy(candidate => candidate.DistanceKm ?? double.MaxValue)
@@ -49,7 +51,15 @@ public static class CourierAssignmentRanker
         CourierAssignmentCriteria criteria) =>
         criteria.PreferDeliveryClusters && candidate.ActiveOrderCount > 0 &&
         candidate.NearestActiveDeliveryDistanceKm.HasValue &&
-        candidate.NearestActiveDeliveryDistanceKm.Value <= criteria.DeliveryClusterRadiusKm;
+        candidate.NearestActiveDeliveryDistanceKm.Value <= criteria.DeliveryClusterRadiusKm &&
+        candidate.NearestActiveDeliveryBearingDifferenceDegrees.HasValue &&
+        candidate.NearestActiveDeliveryBearingDifferenceDegrees.Value <= criteria.DeliveryClusterMaxBearingDegrees;
+
+    private static double CalculateClusterScore(CourierAssignmentCandidate candidate,
+        CourierAssignmentCriteria criteria) =>
+        candidate.NearestActiveDeliveryDistanceKm!.Value / criteria.DeliveryClusterRadiusKm +
+        candidate.NearestActiveDeliveryBearingDifferenceDegrees!.Value /
+        criteria.DeliveryClusterMaxBearingDegrees;
 
     private static bool IsLocationEligible(RankedCandidate candidate, CourierAssignmentCriteria criteria)
     {
@@ -79,6 +89,35 @@ public static class CourierAssignmentRanker
         double a = Math.Pow(Math.Sin(latitudeDelta / 2), 2) +
                    Math.Cos(startLatitude) * Math.Cos(endLatitude) * Math.Pow(Math.Sin(longitudeDelta / 2), 2);
         return earthRadiusKm * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+    }
+
+    public static double? CalculateBearingDifferenceDegrees(double? originLatitude, double? originLongitude,
+        double? firstLatitude, double? firstLongitude, double? secondLatitude, double? secondLongitude)
+    {
+        if (!originLatitude.HasValue || !originLongitude.HasValue || !firstLatitude.HasValue ||
+            !firstLongitude.HasValue || !secondLatitude.HasValue || !secondLongitude.HasValue)
+            return null;
+        if (CalculateDistanceKm(originLatitude, originLongitude, firstLatitude, firstLongitude) is < 0.1 ||
+            CalculateDistanceKm(originLatitude, originLongitude, secondLatitude, secondLongitude) is < 0.1)
+            return null;
+
+        double firstBearing = CalculateBearing(originLatitude.Value, originLongitude.Value,
+            firstLatitude.Value, firstLongitude.Value);
+        double secondBearing = CalculateBearing(originLatitude.Value, originLongitude.Value,
+            secondLatitude.Value, secondLongitude.Value);
+        double difference = Math.Abs(firstBearing - secondBearing);
+        return Math.Min(difference, 360 - difference);
+    }
+
+    private static double CalculateBearing(double originLatitude, double originLongitude,
+        double targetLatitude, double targetLongitude)
+    {
+        double start = ToRadians(originLatitude);
+        double end = ToRadians(targetLatitude);
+        double longitudeDelta = ToRadians(targetLongitude - originLongitude);
+        double y = Math.Sin(longitudeDelta) * Math.Cos(end);
+        double x = Math.Cos(start) * Math.Sin(end) - Math.Sin(start) * Math.Cos(end) * Math.Cos(longitudeDelta);
+        return (Math.Atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
 
     private static double ToRadians(double degrees) => degrees * Math.PI / 180;
