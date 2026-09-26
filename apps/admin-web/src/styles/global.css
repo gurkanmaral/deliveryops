@@ -429,6 +429,15 @@ tbody tr:hover { background: #fcfbf9; }
 .routing-provider-status span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .routing-provider-status--ready { color: var(--green); background: var(--green-soft); border-color: #bfe4d2; }
 .routing-provider-status--offline { color: var(--red); background: var(--red-soft); border-color: #f5caca; }
+.dispatch-safety-badge { padding: 5px 9px; color: var(--green); background: var(--green-soft); border-radius: 999px; font-size: 11px; font-weight: 700; }
+.dispatch-checklist { margin: 0; padding: 0 20px 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; list-style: none; }
+.dispatch-check { min-height: 66px; padding: 11px 13px; display: flex; align-items: flex-start; gap: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.dispatch-check > span { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; color: var(--green); background: var(--green-soft); border-radius: 50%; }
+.dispatch-check div { display: grid; gap: 3px; }
+.dispatch-check strong { color: var(--ink); font-size: 13px; }
+.dispatch-check small { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.dispatch-check--warning { border-color: #f1d9a6; background: var(--amber-soft); }
+.dispatch-check--warning > span { color: var(--amber); background: #fff7e5; }
 .setting-toggle { width: 100%; min-height: 66px; padding: 13px 20px; display: flex; align-items: center; justify-content: space-between; gap: 20px; text-align: left; color: inherit; background: var(--surface); border: 0; border-top: 1px solid var(--line); }
 .setting-toggle:hover { background: var(--surface-2); }
 .setting-toggle > span { display: grid; gap: 3px; }
@@ -658,7 +667,7 @@ tbody tr:hover { background: #fcfbf9; }
   .credit-admin-tools form + form { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (max-width: 900px) {
-  .dispatch-grid, .settings-grid { grid-template-columns: 1fr; }
+  .dispatch-grid, .settings-grid, .dispatch-checklist { grid-template-columns: 1fr; }
   .sla-grid { grid-template-columns: 1fr 1fr; }
   .outbox-summary-grid { grid-template-columns: 1fr 1fr; }
   .outbox-row { align-items: flex-start; flex-wrap: wrap; }

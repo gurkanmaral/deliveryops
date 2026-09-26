@@ -14,6 +14,8 @@ internal sealed class BusinessDispatchSettingsConfiguration : IEntityTypeConfigu
         builder.Property(x => x.PreferDeliveryClusters).HasDefaultValue(true);
         builder.Property(x => x.DeliveryClusterRadiusKm).HasDefaultValue(2d);
         builder.Property(x => x.DeliveryClusterMaxBearingDegrees).HasDefaultValue(45d);
+        builder.Property(x => x.RequireFreshLocation).HasDefaultValue(true);
+        builder.Property(x => x.AssignmentRadiusKm).HasDefaultValue(10d);
         builder.HasOne<Business>().WithOne().HasForeignKey<BusinessDispatchSettings>(x => x.BusinessId)
             .OnDelete(DeleteBehavior.Cascade);
     }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Save, Settings2 } from 'lucide-react'
+import { CheckCircle2, Save, Settings2, ShieldCheck } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { getJson, requestJson } from '../../shared/api/httpClient'
 import type { PagedResponse } from '../../shared/api/types'
@@ -31,7 +31,7 @@ interface RoadRoutingStatus {
 const initialSettings: DispatchSettings = {
   businessId: '', autoConfirmOrders: false, autoAssignCouriers: false,
   allowCourierSelfClaim: true, preferBranchCouriers: true, maxActiveOrdersPerCourier: 2,
-  requireFreshLocation: false, locationFreshnessMinutes: 5,
+  requireFreshLocation: true, locationFreshnessMinutes: 5, assignmentRadiusKm: 10,
   preferDeliveryClusters: true, deliveryClusterRadiusKm: 2, deliveryClusterMaxBearingDegrees: 45,
 }
 
@@ -116,6 +116,20 @@ export function DispatchSettingsPage() {
         </div>
       </article>
 
+      <article className="panel settings-card settings-card--route">
+        <div className="panel__heading"><div><h2><ShieldCheck size={17} className="inline-icon" /> Atama kontrol zinciri</h2><p>Otomatik atamadan önce kurallar bu sırayla uygulanır</p></div><span className="dispatch-safety-badge">8 kontrol</span></div>
+        <ol className="dispatch-checklist">
+          <DispatchCheck title="Mesai ve müsaitlik" description="Kurye aktif, mesaide ve paket kabul edebilir durumda olmalıdır." />
+          <DispatchCheck title="Güncel kurye konumu" description={form.requireFreshLocation ? `Konum en fazla ${form.locationFreshnessMinutes} dakika eski olabilir.` : 'Zorunluluk kapalı; üretimde etkinleştirilmesi önerilir.'} warning={!form.requireFreshLocation} />
+          <DispatchCheck title="Şubeye erişim" description={form.assignmentRadiusKm ? `Kurye şubeye en fazla ${form.assignmentRadiusKm} km uzakta olabilir.` : 'Mesafe sınırı yok; üretimde bir sınır tanımlanması önerilir.'} warning={!form.assignmentRadiusKm} />
+          <DispatchCheck title="Paket kapasitesi" description={`Kurye üzerinde en fazla ${form.maxActiveOrdersPerCourier} aktif paket bulunabilir.`} />
+          <DispatchCheck title="Kesin teslimat koordinatı" description="Yaklaşık veya eksik koordinatlar rota grubuna alınmaz." />
+          <DispatchCheck title="Gerçek yol mesafesi" description={`Motosiklet yolu ${form.deliveryClusterRadiusKm.toFixed(1)} km sınırını aşmamalıdır.`} warning={!routingStatus.data?.isAvailable} />
+          <DispatchCheck title="Çıkış yönü uyumu" description={`Şubeden çıkış yönleri arasındaki fark en fazla ${form.deliveryClusterMaxBearingDegrees}° olabilir.`} />
+          <DispatchCheck title="En iyi güvenli puan" description="Kapasite, gerçek yol mesafesi, yön ve konum birlikte puanlanarak en uygun kurye seçilir." />
+        </ol>
+      </article>
+
       <div className="settings-actions">
         <button className="primary-button" disabled={save.isPending}><Save size={17} /> {save.isPending ? 'Kaydediliyor…' : 'Ayarları kaydet'}</button>
         {save.isSuccess && <span className="save-success">Ayarlar kaydedildi.</span>}
@@ -123,6 +137,12 @@ export function DispatchSettingsPage() {
       </div>
     </form>}
   </section>
+}
+
+function DispatchCheck({ title, description, warning = false }: { title: string; description: string; warning?: boolean }) {
+  return <li className={warning ? 'dispatch-check dispatch-check--warning' : 'dispatch-check'}>
+    <span><CheckCircle2 size={17} /></span><div><strong>{title}</strong><small>{description}</small></div>
+  </li>
 }
 
 function SettingToggle({ checked, title, description, onChange, compact = false }: { checked: boolean; title: string; description: string; onChange(): void; compact?: boolean }) {

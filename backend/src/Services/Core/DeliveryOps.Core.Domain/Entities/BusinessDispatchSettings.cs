@@ -17,9 +17,9 @@ public sealed class BusinessDispatchSettings : Entity
     public bool AllowCourierSelfClaim { get; private set; } = true;
     public bool PreferBranchCouriers { get; private set; } = true;
     public int MaxActiveOrdersPerCourier { get; private set; } = 2;
-    public bool RequireFreshLocation { get; private set; }
+    public bool RequireFreshLocation { get; private set; } = true;
     public int LocationFreshnessMinutes { get; private set; } = 5;
-    public double? AssignmentRadiusKm { get; private set; }
+    public double? AssignmentRadiusKm { get; private set; } = 10;
     public bool PreferDeliveryClusters { get; private set; } = true;
     public double DeliveryClusterRadiusKm { get; private set; } = 2;
     public double DeliveryClusterMaxBearingDegrees { get; private set; } = 45;

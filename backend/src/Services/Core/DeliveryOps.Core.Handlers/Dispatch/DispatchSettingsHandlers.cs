@@ -26,7 +26,7 @@ public sealed class GetDispatchSettingsHandler(ICoreDbContext context, IRequestC
     }
 
     internal static DispatchSettingsResponse Map(BusinessDispatchSettings? settings, Guid businessId) => settings is null
-        ? new DispatchSettingsResponse(businessId, false, false, true, true, 2, false, 5, null, true, 2, 45)
+        ? new DispatchSettingsResponse(businessId, false, false, true, true, 2, true, 5, 10, true, 2, 45)
         : new DispatchSettingsResponse(settings.BusinessId, settings.AutoConfirmOrders, settings.AutoAssignCouriers,
             settings.AllowCourierSelfClaim, settings.PreferBranchCouriers, settings.MaxActiveOrdersPerCourier,
             settings.RequireFreshLocation, settings.LocationFreshnessMinutes, settings.AssignmentRadiusKm,

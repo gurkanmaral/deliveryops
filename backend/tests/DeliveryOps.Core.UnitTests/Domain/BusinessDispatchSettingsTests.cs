@@ -5,6 +5,16 @@ namespace DeliveryOps.Core.UnitTests.Domain;
 public sealed class BusinessDispatchSettingsTests
 {
     [Fact]
+    public void CreateDefault_UsesSafeLocationLimits()
+    {
+        BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
+
+        Assert.True(settings.RequireFreshLocation);
+        Assert.Equal(5, settings.LocationFreshnessMinutes);
+        Assert.Equal(10, settings.AssignmentRadiusKm);
+    }
+
+    [Fact]
     public void Update_EnablesAutoConfirmationWhenAutoAssignmentIsEnabled()
     {
         BusinessDispatchSettings settings = BusinessDispatchSettings.CreateDefault(Guid.NewGuid());
