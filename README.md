@@ -138,6 +138,15 @@ docker compose --env-file /secure/path/deliveryops.production.env \
 
 Production override eksik secret, RSA anahtarı veya origin olduğunda başlamaz. API portları yalnızca loopback'e açılır; internet trafiği TLS sonlandıran bir reverse proxy üzerinden yönlendirilmelidir. PostgreSQL, Redis, RabbitMQ ve Data Protection volume'ları düzenli yedeklenmeli; `.env` dosyası image içine kopyalanmamalı veya repoya eklenmemelidir.
 
+Kurye rota gruplaması production ortamında Google Routes API `Compute Route Matrix` ile `TWO_WHEELER` yol mesafesini doğrular. Google Cloud projesinde Routes API ve faturalandırma etkinleştirilmeli; anahtar yalnızca sunucu IP'leri ve Routes API ile sınırlandırılmalıdır:
+
+```bash
+DELIVERYOPS_ROAD_ROUTING_ENABLED=true
+DELIVERYOPS_GOOGLE_ROUTES_API_KEY=restricted-server-side-key
+```
+
+Kuş uçuşu mesafe yalnızca maliyetsiz ön eleme için kullanılır. Nihai gruplama gerçek motosiklet yol mesafesiyle yapılır. API anahtarı eksikse, sağlayıcı hata verirse, rota bulunamazsa veya koordinat yaklaşık ise sistem güvenli biçimde otomatik gruplama yapmaz; normal kurye kapasite sıralamasına döner. Anahtar istemci uygulamalarına gönderilmez ve rota sonuçları kalıcı olarak önbelleğe alınmaz.
+
 Kurye uygulaması:
 
 ```bash

@@ -21,6 +21,13 @@ interface DispatchSettings {
   deliveryClusterMaxBearingDegrees: number
 }
 
+interface RoadRoutingStatus {
+  isAvailable: boolean
+  provider: string
+  travelMode: string
+  failClosed: boolean
+}
+
 const initialSettings: DispatchSettings = {
   businessId: '', autoConfirmOrders: false, autoAssignCouriers: false,
   allowCourierSelfClaim: true, preferBranchCouriers: true, maxActiveOrdersPerCourier: 2,
@@ -41,6 +48,10 @@ export function DispatchSettingsPage() {
     queryKey: ['dispatch-settings', businessId],
     enabled: !!businessId,
     queryFn: ({ signal }) => getJson<DispatchSettings>(`/api/v1/dispatch/settings?businessId=${businessId}`, signal),
+  })
+  const routingStatus = useQuery({
+    queryKey: ['road-routing-status'],
+    queryFn: ({ signal }) => getJson<RoadRoutingStatus>('/api/v1/dispatch/routing-status', signal),
   })
   const [form, setForm] = useState<DispatchSettings>(initialSettings)
   useEffect(() => { if (settingsQuery.data) setForm({ ...initialSettings, ...settingsQuery.data }) }, [settingsQuery.data])
@@ -92,6 +103,7 @@ export function DispatchSettingsPage() {
       <article className="panel settings-card settings-card--route">
         <div className="panel__heading"><div><h2>Rota gruplama</h2><p>Aynı yöne giden paketleri kontrollü biçimde aynı kuryede toplayın</p></div><div className="route-rule"><strong>{form.deliveryClusterRadiusKm.toFixed(1)} km</strong><span>en fazla {form.deliveryClusterMaxBearingDegrees}° yön farkı</span></div></div>
         <div className="settings-fields">
+          <div className={`routing-provider-status ${routingStatus.data?.isAvailable ? 'routing-provider-status--ready' : 'routing-provider-status--offline'}`}><strong>{routingStatus.data?.isAvailable ? 'Gerçek yol doğrulaması yapılandırıldı' : 'Gerçek yol doğrulaması kapalı'}</strong><span>{routingStatus.data?.isAvailable ? `${routingStatus.data.provider} · motosiklet rotası · servis hatasında güvenli kapatma` : 'API anahtarı tanımlanana kadar sistem paketleri otomatik rota grubuna almaz.'}</span></div>
           <SettingToggle checked={form.preferDeliveryClusters} title="Aynı rota paketlerini grupla" description="Yalnızca doğrulanmış koordinatı olan ve aynı çıkış yönündeki teslimatları gruplar." onChange={() => toggle('preferDeliveryClusters')} compact />
           <div className="route-presets" aria-label="Rota gruplama hazır ayarları">
             <button type="button" onClick={() => setForm(current => ({ ...current, deliveryClusterRadiusKm: 1, deliveryClusterMaxBearingDegrees: 30 }))}>Sıkı · 1 km / 30°</button>
@@ -100,7 +112,7 @@ export function DispatchSettingsPage() {
           </div>
           <label>Teslimat yakınlık yarıçapı (km)<input type="number" min="0.1" max="25" step="0.1" value={form.deliveryClusterRadiusKm} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterRadiusKm: Number(event.target.value) }))} /></label>
           <label>Azami yön farkı (derece)<input type="number" min="5" max="180" step="1" value={form.deliveryClusterMaxBearingDegrees} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterMaxBearingDegrees: Number(event.target.value) }))} /></label>
-          <p className="settings-hint">Bir eşleşme için hem kilometre hem yön şartı sağlanır. Yaklaşık veya eksik koordinatlar otomatik gruplamaya alınmaz; normal kapasite sıralamasıyla değerlendirilir.</p>
+          <p className="settings-hint">Kuş uçuşu mesafe yalnızca ön elemedir. Nihai eşleşme motosikletin gerçekten kullanacağı yol mesafesiyle doğrulanır; servis hatasında veya yaklaşık koordinatta otomatik gruplama yapılmaz.</p>
         </div>
       </article>
 

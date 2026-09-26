@@ -424,6 +424,11 @@ tbody tr:hover { background: #fcfbf9; }
 .route-presets { display: flex; gap: 8px; flex-wrap: wrap; }
 .route-presets button { padding: 7px 10px; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 12px; font-weight: 600; }
 .route-presets button:hover { color: var(--accent); border-color: var(--accent); }
+.routing-provider-status { padding: 11px 13px; display: grid; gap: 3px; border: 1px solid; border-radius: var(--r-sm); }
+.routing-provider-status strong { font-size: 13px; }
+.routing-provider-status span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.routing-provider-status--ready { color: var(--green); background: var(--green-soft); border-color: #bfe4d2; }
+.routing-provider-status--offline { color: var(--red); background: var(--red-soft); border-color: #f5caca; }
 .setting-toggle { width: 100%; min-height: 66px; padding: 13px 20px; display: flex; align-items: center; justify-content: space-between; gap: 20px; text-align: left; color: inherit; background: var(--surface); border: 0; border-top: 1px solid var(--line); }
 .setting-toggle:hover { background: var(--surface-2); }
 .setting-toggle > span { display: grid; gap: 3px; }

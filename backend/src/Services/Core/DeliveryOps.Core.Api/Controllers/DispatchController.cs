@@ -9,8 +9,13 @@ namespace DeliveryOps.Core.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/dispatch")]
-public sealed class DispatchController(ISender sender) : ApiControllerBase
+public sealed class DispatchController(ISender sender, IRoadRouteDistanceProvider roadRoutes) : ApiControllerBase
 {
+    [HttpGet("routing-status")]
+    [Authorize(Policy = Permissions.DispatchRead)]
+    public ActionResult<RoadRoutingStatusResponse> GetRoutingStatus() => Ok(new RoadRoutingStatusResponse(
+        roadRoutes.IsAvailable, roadRoutes.ProviderName, "TWO_WHEELER", true));
+
     [HttpGet("queue")]
     [Authorize(Policy = Permissions.DispatchRead)]
     public async Task<ActionResult<PagedResponse<DispatchQueueItemResponse>>> GetQueue([FromQuery] Guid? businessId,
@@ -59,3 +64,5 @@ public sealed record UpdateDispatchSettingsRequest(Guid? BusinessId, bool AutoCo
     bool RequireFreshLocation, int LocationFreshnessMinutes, double? AssignmentRadiusKm,
     bool PreferDeliveryClusters = true, double DeliveryClusterRadiusKm = 2,
     double DeliveryClusterMaxBearingDegrees = 45);
+public sealed record RoadRoutingStatusResponse(bool IsAvailable, string Provider, string TravelMode,
+    bool FailClosed);

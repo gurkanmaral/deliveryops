@@ -7,7 +7,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DeliveryOps.Core.Handlers.Dispatch;
 
-public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider timeProvider)
+public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider timeProvider,
+    IRoadRouteDistanceProvider roadRoutes)
 {
     private static readonly OrderStatus[] ActiveOrderStatuses =
         [OrderStatus.Assigned, OrderStatus.PickedUp, OrderStatus.OnTheWay, OrderStatus.DeliveryFailed];
@@ -32,7 +33,8 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
 
         Dictionary<Guid, (double? DistanceKm, double? BearingDifferenceDegrees)> clusterMetrics = courierIds
             .ToDictionary(x => x, _ => ((double?)null, (double?)null));
-        if (settings.PreferDeliveryClusters && order.DeliveryLatitude.HasValue && order.DeliveryLongitude.HasValue &&
+        if (settings.PreferDeliveryClusters && roadRoutes.IsAvailable && order.DeliveryLatitude.HasValue &&
+            order.DeliveryLongitude.HasValue &&
             order.DeliveryLocationAccuracy == DeliveryLocationAccuracy.Exact && branch.Latitude.HasValue &&
             branch.Longitude.HasValue)
         {
@@ -42,23 +44,54 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
                             x.DeliveryLongitude.HasValue && x.DeliveryLocationAccuracy == DeliveryLocationAccuracy.Exact)
                 .Select(x => new { CourierId = x.CourierId!.Value, x.DeliveryLatitude, x.DeliveryLongitude })
                 .ToListAsync(cancellationToken);
-            foreach (var group in activeDeliveries.GroupBy(x => x.CourierId))
+            List<PreliminaryRouteMatch> preliminaryMatches = activeDeliveries.Select(activeOrder =>
             {
-                var bestMatch = group.Select(activeOrder => new
+                double? distanceKm = CourierAssignmentRanker.CalculateDistanceKm(activeOrder.DeliveryLatitude,
+                    activeOrder.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude);
+                double? bearing = CourierAssignmentRanker.CalculateBearingDifferenceDegrees(branch.Latitude,
+                    branch.Longitude, activeOrder.DeliveryLatitude, activeOrder.DeliveryLongitude,
+                    order.DeliveryLatitude, order.DeliveryLongitude);
+                return new PreliminaryRouteMatch(activeOrder.CourierId, activeOrder.DeliveryLatitude!.Value,
+                    activeOrder.DeliveryLongitude!.Value, distanceKm, bearing);
+            }).Where(match => match.AirDistanceKm.HasValue &&
+                              match.AirDistanceKm <= settings.DeliveryClusterRadiusKm &&
+                              match.BearingDifferenceDegrees.HasValue &&
+                              match.BearingDifferenceDegrees <= settings.DeliveryClusterMaxBearingDegrees)
+                .OrderBy(match => match.AirDistanceKm)
+                .ThenBy(match => match.BearingDifferenceDegrees)
+                .Take(roadRoutes.MaxElementsPerRequest)
+                .ToList();
+
+            if (preliminaryMatches.Count > 0)
+            {
+                RoadRoutePoint newDestination = new(order.DeliveryLatitude.Value, order.DeliveryLongitude.Value);
+                RoadRoutePoint[] activeDestinations = preliminaryMatches
+                    .Select(match => new RoadRoutePoint(match.Latitude, match.Longitude)).ToArray();
+                Task<IReadOnlyList<RoadRouteElement>> forwardTask = roadRoutes.CalculateMatrixAsync(
+                    activeDestinations, [newDestination], cancellationToken);
+                Task<IReadOnlyList<RoadRouteElement>> reverseTask = roadRoutes.CalculateMatrixAsync(
+                    [newDestination], activeDestinations, cancellationToken);
+                await Task.WhenAll(forwardTask, reverseTask);
+                Dictionary<int, double> forward = forwardTask.Result.ToDictionary(x => x.OriginIndex, x => x.DistanceKm);
+                Dictionary<int, double> reverse = reverseTask.Result.ToDictionary(x => x.DestinationIndex, x => x.DistanceKm);
+
+                var verifiedMatches = preliminaryMatches.Select((match, index) => new
                     {
-                        DistanceKm = CourierAssignmentRanker.CalculateDistanceKm(activeOrder.DeliveryLatitude,
-                            activeOrder.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude),
-                        BearingDifferenceDegrees = CourierAssignmentRanker.CalculateBearingDifferenceDegrees(
-                            branch.Latitude, branch.Longitude, activeOrder.DeliveryLatitude,
-                            activeOrder.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude)
+                        Match = match,
+                        RoadDistanceKm = ResolveShortestRoadDistance(forward.GetValueOrDefault(index, double.MaxValue),
+                            reverse.GetValueOrDefault(index, double.MaxValue))
                     })
-                    .Where(match => match.DistanceKm.HasValue && match.BearingDifferenceDegrees.HasValue)
-                    .OrderBy(match => match.DistanceKm!.Value / settings.DeliveryClusterRadiusKm +
-                                      match.BearingDifferenceDegrees!.Value /
-                                      settings.DeliveryClusterMaxBearingDegrees)
-                    .FirstOrDefault();
-                if (bestMatch is not null)
-                    clusterMetrics[group.Key] = (bestMatch.DistanceKm, bestMatch.BearingDifferenceDegrees);
+                    .Where(match => match.RoadDistanceKm <= settings.DeliveryClusterRadiusKm)
+                    .GroupBy(match => match.Match.CourierId);
+                foreach (var group in verifiedMatches)
+                {
+                    var bestMatch = group.OrderBy(match =>
+                        match.RoadDistanceKm / settings.DeliveryClusterRadiusKm +
+                        match.Match.BearingDifferenceDegrees!.Value /
+                        settings.DeliveryClusterMaxBearingDegrees).First();
+                    clusterMetrics[group.Key] = (bestMatch.RoadDistanceKm,
+                        bestMatch.Match.BearingDifferenceDegrees);
+                }
             }
         }
 
@@ -112,4 +145,10 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
         }
         return result;
     }
+
+    private static double ResolveShortestRoadDistance(double forwardKm, double reverseKm) =>
+        Math.Min(forwardKm, reverseKm);
+
+    private sealed record PreliminaryRouteMatch(Guid CourierId, double Latitude, double Longitude,
+        double? AirDistanceKm, double? BearingDifferenceDegrees);
 }

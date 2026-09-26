@@ -72,6 +72,8 @@ services:
       InternalApi__Key: ${DELIVERYOPS_NOTIFICATIONS_KEY:-development-notifications-internal-key-2026}
       InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:-development-integrations-internal-key-2026}
       CoreApi__InternalApiKey: ${DELIVERYOPS_INTEGRATIONS_KEY:-development-integrations-internal-key-2026}
+      RoadRouting__Enabled: ${DELIVERYOPS_ROAD_ROUTING_ENABLED:-false}
+      RoadRouting__GoogleApiKey: ${DELIVERYOPS_GOOGLE_ROUTES_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -20,7 +20,9 @@ using DeliveryOps.Core.Api.Dispatch;
 using DeliveryOps.Core.Handlers.Dispatch;
 using DeliveryOps.Core.Api.Operations;
 using DeliveryOps.Core.Queries.Operations;
+using DeliveryOps.Core.Queries.Dispatch;
 using DeliveryOps.Core.Api.Integrations;
+using DeliveryOps.Core.Api.Routing;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -100,6 +102,20 @@ builder.Services.AddScoped<IOrderOperationsNotifier>(provider => provider.GetReq
 builder.Services.AddScoped<IOperationalAlertNotifier>(provider => provider.GetRequiredService<SignalROperationsNotifier>());
 builder.Services.AddHostedService<CourierPresenceMonitor>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddOptions<RoadRoutingOptions>()
+    .Bind(builder.Configuration.GetSection("RoadRouting"))
+    .Validate(options => options.TimeoutSeconds is >= 1 and <= 30,
+        "RoadRouting:TimeoutSeconds must be between 1 and 30.")
+    .Validate(options => options.MaxElementsPerRequest is >= 1 and <= 625,
+        "RoadRouting:MaxElementsPerRequest must be between 1 and 625.")
+    .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.GoogleApiKey),
+        "RoadRouting:GoogleApiKey is required when road routing is enabled.")
+    .ValidateOnStart();
+builder.Services.AddHttpClient<IRoadRouteDistanceProvider, GoogleRoutesRoadDistanceProvider>(client =>
+{
+    client.BaseAddress = new Uri("https://routes.googleapis.com/");
+    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("RoadRouting:TimeoutSeconds", 5));
+});
 builder.Services.AddHttpClient("Notifications", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["Notifications:BaseUrl"] ?? "http://localhost:5300/");
