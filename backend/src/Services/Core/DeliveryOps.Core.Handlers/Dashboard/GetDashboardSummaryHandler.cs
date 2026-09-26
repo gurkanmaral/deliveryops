@@ -22,6 +22,11 @@ public sealed class GetDashboardSummaryHandler(ICoreDbContext context, IRequestC
             couriers = couriers.Where(x => x.BusinessId == businessId.Value);
             orders = orders.Where(x => x.BusinessId == businessId.Value);
         }
+        if (requestContext.BranchId.HasValue)
+        {
+            couriers = couriers.Where(x => x.BranchId == requestContext.BranchId.Value);
+            orders = orders.Where(x => x.BranchId == requestContext.BranchId.Value);
+        }
 
         int activeBusinesses = requestContext.IsPlatformAdmin
             ? await context.Businesses.CountAsync(x => x.IsActive, cancellationToken)

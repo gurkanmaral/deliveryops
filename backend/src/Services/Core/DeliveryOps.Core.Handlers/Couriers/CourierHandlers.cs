@@ -35,7 +35,7 @@ public sealed class GetCourierHandler(ICoreDbContext context, IRequestContext re
     {
         Courier? courier = await context.Couriers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (courier is null) return Result<CourierResponse>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (!TenantAccess.CanAccess(requestContext, courier.BusinessId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
         return Result<CourierResponse>.Success(CourierMapper.Map(courier));
     }
 }
@@ -62,6 +62,8 @@ public sealed class CreateCourierHandler(ICoreDbContext context, IRequestContext
     public async Task<Result<CourierResponse>> Handle(CreateCourierCommand request, CancellationToken cancellationToken)
     {
         if (!TenantAccess.CanAccess(requestContext, request.BusinessId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
+        if (requestContext.BranchId.HasValue && request.BranchId != requestContext.BranchId)
+            return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
         if (request.BranchId.HasValue && !await context.Branches.AnyAsync(x => x.Id == request.BranchId && x.BusinessId == request.BusinessId && x.IsActive, cancellationToken))
             return Result<CourierResponse>.Failure(HandlerErrors.NotFound("Şube"));
         if (await context.Couriers.AnyAsync(x => x.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken))
@@ -81,7 +83,7 @@ public sealed class UpdateCourierHandler(ICoreDbContext context, IRequestContext
     {
         Courier? courier = await context.Couriers.FindAsync([request.Id], cancellationToken);
         if (courier is null) return Result<CourierResponse>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (!TenantAccess.CanAccess(requestContext, courier.BusinessId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
         if (await context.Couriers.AnyAsync(x => x.Id != request.Id && x.PhoneNumber == request.PhoneNumber.Trim(), cancellationToken))
             return Result<CourierResponse>.Failure(HandlerErrors.Conflict("Bu telefon numarası zaten kullanılıyor."));
         courier.Update(request.FirstName, request.LastName, request.PhoneNumber);
@@ -115,7 +117,7 @@ public sealed class UpdateCourierStatusHandler(ICoreDbContext context, IRequestC
     {
         Courier? courier = await context.Couriers.FindAsync([request.Id], cancellationToken);
         if (courier is null) return Result<CourierResponse>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (!TenantAccess.CanAccess(requestContext, courier.BusinessId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId)) return Result<CourierResponse>.Failure(HandlerErrors.Forbidden);
         courier.SetAvailability(request.Availability);
         courier.SetDeliveryStatus(request.DeliveryStatus);
         await context.SaveChangesAsync(cancellationToken);
@@ -130,7 +132,7 @@ public sealed class DeactivateCourierHandler(ICoreDbContext context, IRequestCon
     {
         Courier? courier = await context.Couriers.FindAsync([request.Id], cancellationToken);
         if (courier is null) return Result.Failure(HandlerErrors.NotFound("Kurye"));
-        if (!TenantAccess.CanAccess(requestContext, courier.BusinessId)) return Result.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId)) return Result.Failure(HandlerErrors.Forbidden);
         courier.Deactivate();
         await context.SaveChangesAsync(cancellationToken);
         return Result.Success();

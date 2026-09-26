@@ -167,12 +167,12 @@ registered_token="ExpoPushToken[deliveryops-local-smoke-$(date +%s)]"
 device_payload="$(jq -nc --arg token "$registered_token" '{expoPushToken:$token,platform:"ios",deviceName:"Local Smoke Test"}')"
 request 'Push cihazı kaydı' 200 POST "$NOTIFICATIONS_API_URL/api/v1/devices" "$courier_token" "$device_payload"
 request 'Push cihazı listesi' 200 GET "$NOTIFICATIONS_API_URL/api/v1/devices/me" "$courier_token"
-assert_response 'Test cihazı aktif listede' 'map(select(.deviceName == "Local Smoke Test")) | length == 1'
+assert_response 'Test cihazı aktif listede' '.items | map(select(.deviceName == "Local Smoke Test")) | length == 1'
 delete_payload="$(jq -nc --arg token "$registered_token" '{expoPushToken:$token}')"
 request 'Push cihazı kaydını kaldırma' 204 DELETE "$NOTIFICATIONS_API_URL/api/v1/devices" "$courier_token" "$delete_payload"
 registered_token=""
 request 'Push cihazı kaldırıldı' 200 GET "$NOTIFICATIONS_API_URL/api/v1/devices/me" "$courier_token"
-assert_response 'Test cihazı aktif listeden çıktı' 'map(select(.deviceName == "Local Smoke Test")) | length == 0'
+assert_response 'Test cihazı aktif listeden çıktı' '.items | map(select(.deviceName == "Local Smoke Test")) | length == 0'
 
 logout_payload="$(jq -nc --arg token "$mobile_refresh_token" '{refreshToken:$token}')"
 request 'Kurye mobil çıkışı' 204 POST "$AUTH_API_URL/api/v1/auth/mobile/logout" '' "$logout_payload"

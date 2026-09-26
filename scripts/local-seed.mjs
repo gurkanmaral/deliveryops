@@ -102,7 +102,7 @@ async function ensureUser(users, definition) {
 }
 
 async function ensureShift(courierId, businessId) {
-  const active = (await request(urls.core, `/api/v1/shifts/active?businessId=${businessId}`, { token })).data;
+  const active = (await request(urls.core, `/api/v1/shifts/active?businessId=${businessId}&pageSize=100`, { token })).data.items;
   if (!active.some(item => item.courierId === courierId)) {
     await request(urls.core, `/api/v1/shifts/couriers/${courierId}/start`, { token, method: 'POST' });
   }
@@ -170,7 +170,7 @@ async function ensureOrder(context, definition, index) {
 }
 
 async function ensureConnection(context, provider, name, authMode, adapterVersion) {
-  const connections = (await request(urls.integrations, '/api/v1/integrations', { token })).data;
+  const connections = (await request(urls.integrations, '/api/v1/integrations?pageSize=100', { token })).data.items;
   if (connections.some(item => item.businessId === context.business.id && item.name === name)) return;
   await request(urls.integrations, '/api/v1/integrations', {
     token,
@@ -222,7 +222,7 @@ const definitions = [
 const contexts = [];
 for (const definition of definitions) contexts.push(await ensureBusiness(definition));
 
-const users = (await request(urls.auth, '/api/v1/users', { token })).data;
+const users = (await request(urls.auth, '/api/v1/users?pageSize=100', { token })).data.items;
 for (const context of contexts) {
   await ensureUser(users, { ...context.admin, role: 'BusinessAdmin', businessId: context.business.id, branchId: null, courierId: null });
   await ensureUser(users, { ...context.staff, role: 'BusinessStaff', businessId: context.business.id, branchId: null, courierId: null });
@@ -258,9 +258,12 @@ for (const context of contexts) {
       allowCourierSelfClaim: true,
       preferBranchCouriers: true,
       maxActiveOrdersPerCourier: 5,
-      requireFreshLocation: false,
-      locationFreshnessMinutes: 10,
-      assignmentRadiusKm: 15,
+      requireFreshLocation: true,
+      locationFreshnessMinutes: 5,
+      assignmentRadiusKm: 10,
+      preferDeliveryClusters: true,
+      deliveryClusterRadiusKm: 2,
+      deliveryClusterMaxBearingDegrees: 45,
     },
   });
   await request(urls.core, '/api/v1/billing/settings', {
@@ -269,7 +272,7 @@ for (const context of contexts) {
     body: { businessId: context.business.id, feePerDeliveredOrder: 18.5, commissionRatePercent: 2.5, feePerReturnedOrder: 7.5, taxRatePercent: 20 },
   });
 
-  const latestLocations = (await request(urls.core, `/api/v1/locations/latest?businessId=${context.business.id}`, { token })).data;
+  const latestLocations = (await request(urls.core, `/api/v1/locations/latest?businessId=${context.business.id}&pageSize=100`, { token })).data.items;
   for (let courierIndex = 0; courierIndex < context.couriers.length; courierIndex++) {
     const courier = context.couriers[courierIndex];
     await ensureShift(courier.id, context.business.id);

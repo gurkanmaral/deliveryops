@@ -16,7 +16,7 @@ public sealed class StartCourierShiftHandler(ICoreDbContext context, IRequestCon
     {
         Courier? courier = await context.Couriers.FindAsync([request.CourierId], cancellationToken);
         if (courier is null || !courier.IsActive) return Result<CourierShiftResponse>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (requestContext.CourierId != courier.Id && !TenantAccess.CanAccess(requestContext, courier.BusinessId))
+        if (requestContext.CourierId != courier.Id && !TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId))
             return Result<CourierShiftResponse>.Failure(HandlerErrors.Forbidden);
         if (await context.CourierShifts.AnyAsync(x => x.CourierId == courier.Id && x.EndedAtUtc == null, cancellationToken))
             return Result<CourierShiftResponse>.Failure(HandlerErrors.Conflict("Kurye zaten mesaide."));
@@ -36,7 +36,7 @@ public sealed class EndCourierShiftHandler(ICoreDbContext context, IRequestConte
     {
         Courier? courier = await context.Couriers.FindAsync([request.CourierId], cancellationToken);
         if (courier is null) return Result<CourierShiftResponse>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (requestContext.CourierId != courier.Id && !TenantAccess.CanAccess(requestContext, courier.BusinessId))
+        if (requestContext.CourierId != courier.Id && !TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId))
             return Result<CourierShiftResponse>.Failure(HandlerErrors.Forbidden);
         CourierShift? shift = await context.CourierShifts.SingleOrDefaultAsync(x => x.CourierId == courier.Id && x.EndedAtUtc == null, cancellationToken);
         if (shift is null) return Result<CourierShiftResponse>.Failure(HandlerErrors.NotFound("Aktif mesai"));
@@ -56,6 +56,9 @@ public sealed class GetActiveCourierShiftsHandler(ICoreDbContext context, IReque
         if (!requestContext.IsPlatformAdmin && businessId is null) return Result<PagedResponse<CourierShiftResponse>>.Failure(HandlerErrors.Forbidden);
         IQueryable<CourierShift> query = context.CourierShifts.AsNoTracking().Where(x => x.EndedAtUtc == null);
         if (businessId.HasValue) query = query.Where(x => x.BusinessId == businessId.Value);
+        if (requestContext.BranchId.HasValue)
+            query = query.Where(x => context.Couriers.Any(courier =>
+                courier.Id == x.CourierId && courier.BranchId == requestContext.BranchId.Value));
         PagedResponse<CourierShiftResponse> result = await query.OrderByDescending(x => x.StartedAtUtc)
             .Select(x => new CourierShiftResponse(x.Id, x.CourierId, x.BusinessId, x.StartedAtUtc, x.EndedAtUtc))
             .ToPagedAsync(request.Page, request.PageSize, cancellationToken);

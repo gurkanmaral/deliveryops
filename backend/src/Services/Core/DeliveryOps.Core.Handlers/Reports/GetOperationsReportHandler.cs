@@ -36,6 +36,8 @@ public sealed class GetOperationsReportHandler(ICoreDbContext context, IRequestC
         IQueryable<Order> query = context.Orders.AsNoTracking()
             .Where(x => x.CreatedAtUtc >= fromUtc && x.CreatedAtUtc < toExclusiveUtc);
         if (businessId.HasValue) query = query.Where(x => x.BusinessId == businessId.Value);
+        if (requestContext.BranchId.HasValue)
+            query = query.Where(x => x.BranchId == requestContext.BranchId.Value);
 
         List<OrderSnapshot> orders = await query.Select(x => new OrderSnapshot(
             x.Id, x.BusinessId, x.BranchId, x.CourierId, x.Source, x.Status,

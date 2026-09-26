@@ -14,11 +14,35 @@ public sealed class CreateBusinessValidator : AbstractValidator<CreateBusinessCo
 }
 public sealed class CreateBranchValidator : AbstractValidator<CreateBranchCommand>
 {
-    public CreateBranchValidator() { RuleFor(x => x.BusinessId).NotEmpty(); RuleFor(x => x.Name).NotEmpty().MaximumLength(160); RuleFor(x => x.Address).NotEmpty().MaximumLength(500); RuleFor(x => x.Latitude).InclusiveBetween(-90, 90).When(x => x.Latitude.HasValue); RuleFor(x => x.Longitude).InclusiveBetween(-180, 180).When(x => x.Longitude.HasValue); }
+    public CreateBranchValidator()
+    {
+        RuleFor(x => x.BusinessId).NotEmpty();
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(160);
+        RuleFor(x => x.Address).NotEmpty().MaximumLength(500);
+        RuleFor(x => x.Latitude).InclusiveBetween(-90, 90).When(x => x.Latitude.HasValue);
+        RuleFor(x => x.Longitude).InclusiveBetween(-180, 180).When(x => x.Longitude.HasValue);
+        RuleFor(x => x).Must(x => x.Latitude.HasValue == x.Longitude.HasValue)
+            .WithMessage("Şube enlem ve boylamı birlikte gönderilmelidir.");
+        RuleFor(x => x).Must(x => x.Latitude != 0 || x.Longitude != 0)
+            .When(x => x.Latitude.HasValue && x.Longitude.HasValue)
+            .WithMessage("Şube koordinatları sıfır noktası olamaz.");
+    }
 }
 public sealed class UpdateBranchValidator : AbstractValidator<UpdateBranchCommand>
 {
-    public UpdateBranchValidator() { RuleFor(x => x.Id).NotEmpty(); RuleFor(x => x.Name).NotEmpty().MaximumLength(160); RuleFor(x => x.Address).NotEmpty().MaximumLength(500); }
+    public UpdateBranchValidator()
+    {
+        RuleFor(x => x.Id).NotEmpty();
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(160);
+        RuleFor(x => x.Address).NotEmpty().MaximumLength(500);
+        RuleFor(x => x.Latitude).InclusiveBetween(-90, 90).When(x => x.Latitude.HasValue);
+        RuleFor(x => x.Longitude).InclusiveBetween(-180, 180).When(x => x.Longitude.HasValue);
+        RuleFor(x => x).Must(x => x.Latitude.HasValue == x.Longitude.HasValue)
+            .WithMessage("Şube enlem ve boylamı birlikte gönderilmelidir.");
+        RuleFor(x => x).Must(x => x.Latitude != 0 || x.Longitude != 0)
+            .When(x => x.Latitude.HasValue && x.Longitude.HasValue)
+            .WithMessage("Şube koordinatları sıfır noktası olamaz.");
+    }
 }
 public sealed class CreateCourierValidator : AbstractValidator<CreateCourierCommand>
 {
@@ -26,7 +50,7 @@ public sealed class CreateCourierValidator : AbstractValidator<CreateCourierComm
 }
 public sealed class UpdateCourierValidator : AbstractValidator<UpdateCourierCommand>
 {
-    public UpdateCourierValidator() { RuleFor(x => x.Id).NotEmpty(); RuleFor(x => x.FirstName).NotEmpty().MaximumLength(100); RuleFor(x => x.LastName).NotEmpty().MaximumLength(100); RuleFor(x => x.PhoneNumber).NotEmpty().MaximumLength(30); }
+    public UpdateCourierValidator() { RuleFor(x => x.Id).NotEmpty(); RuleFor(x => x.FirstName).NotEmpty().MaximumLength(100); RuleFor(x => x.LastName).NotEmpty().MaximumLength(100); RuleFor(x => x.PhoneNumber).NotEmpty().MaximumLength(30).Matches("^[+0-9 ]+$"); }
 }
 public sealed class CreateOrderValidator : AbstractValidator<CreateOrderCommand>
 {

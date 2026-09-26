@@ -22,6 +22,7 @@ public sealed class GetDispatchQueueHandler(ICoreDbContext context, IRequestCont
             join state in context.OrderDispatchStates.AsNoTracking() on order.Id equals state.OrderId into states
             from state in states.DefaultIfEmpty()
             where order.BusinessId == businessId && order.Status == OrderStatus.WaitingForCourier && order.CourierId == null
+                && (!requestContext.BranchId.HasValue || order.BranchId == requestContext.BranchId.Value)
             orderby order.CreatedAtUtc
             select new DispatchQueueItemResponse(order.Id, order.BusinessId, order.BranchId, order.CustomerName,
                 order.DeliveryAddress, order.CreatedAtUtc, state == null ? DispatchStatus.Pending : state.Status,
@@ -41,7 +42,7 @@ public sealed class GetCourierSuggestionsHandler(ICoreDbContext context, IReques
     {
         Order? order = await context.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.OrderId, cancellationToken);
         if (order is null) return Result<PagedResponse<CourierSuggestionResponse>>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<PagedResponse<CourierSuggestionResponse>>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<PagedResponse<CourierSuggestionResponse>>.Failure(HandlerErrors.Forbidden);
         if (order.Status is not (OrderStatus.Confirmed or OrderStatus.WaitingForCourier or OrderStatus.Assigned))
             return Result<PagedResponse<CourierSuggestionResponse>>.Failure(HandlerErrors.Conflict("Bu sipariş için kurye önerisi üretilemez."));
 
@@ -61,7 +62,7 @@ public sealed class GetDispatchAttemptsHandler(ICoreDbContext context, IRequestC
     {
         Order? order = await context.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.OrderId, cancellationToken);
         if (order is null) return Result<PagedResponse<DispatchAttemptResponse>>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<PagedResponse<DispatchAttemptResponse>>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<PagedResponse<DispatchAttemptResponse>>.Failure(HandlerErrors.Forbidden);
 
         IQueryable<DispatchAttemptResponse> query = from attempt in context.DispatchAttempts.AsNoTracking()
             join courier in context.Couriers.AsNoTracking() on attempt.CourierId equals courier.Id into couriers
@@ -84,7 +85,7 @@ public sealed class RetryDispatchHandler(ICoreDbContext context, IRequestContext
     {
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.OrderId, cancellationToken);
         if (order is null) return Result.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result.Failure(HandlerErrors.Forbidden);
         if (order.Status != OrderStatus.WaitingForCourier || order.CourierId.HasValue)
             return Result.Failure(HandlerErrors.Conflict("Yalnızca kurye bekleyen sipariş yeniden denenebilir."));
         if (!await context.BusinessDispatchSettings.AnyAsync(x => x.BusinessId == order.BusinessId && x.AutoAssignCouriers, cancellationToken))

@@ -1,4 +1,4 @@
-import { coreApi } from '@/shared/api';
+import { ApiError, coreApi } from '@/shared/api';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { getCourierId } from '../auth/session-storage';
@@ -104,12 +104,23 @@ async function drainQueue(queued: QueuedLocation[]) {
       await sendLocation(remaining[0].courierId, remaining[0].payload);
       remaining.shift();
       await writeQueue(remaining);
-    } catch {
+    } catch (error) {
+      if (isPermanentlyRejected(error)) {
+        // Invalid/stale samples can never succeed and must not block newer positions behind them.
+        remaining.shift();
+        await writeQueue(remaining);
+        continue;
+      }
       await writeQueue(remaining);
       break;
     }
   }
   return remaining.length;
+}
+
+function isPermanentlyRejected(error: unknown) {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500 &&
+    error.status !== 408 && error.status !== 429;
 }
 
 export async function getQueuedLocationCount() {

@@ -184,7 +184,9 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
             Business business = Business.Create($"Courier identity {Guid.NewGuid():N}", $"CI{Guid.NewGuid():N}"[..12]);
             Branch branch = Branch.Create(business.Id, "Merkez", "Test adresi", 40.9909, 29.0283);
             Courier courier = Courier.Create(business.Id, branch.Id, "Test", "Kurye", $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            courier.SetAvailability(CourierAvailability.Available);
             context.AddRange(business, branch, courier,
+                CourierShift.Start(courier.Id, business.Id, DateTimeOffset.UtcNow.AddHours(-1)),
                 CourierLocation.Create(courier.Id, business.Id, 40.9911, 29.0290, 5, null, null,
                     DateTimeOffset.UtcNow));
             await context.SaveChangesAsync();
@@ -215,11 +217,13 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
             Branch farBranch = Branch.Create(business.Id, "Uzak Şube", "Sarıyer merkez", 41.1664, 29.0500);
             Courier courier = Courier.Create(business.Id, null, "Yakın", "Kurye",
                 $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            courier.SetAvailability(CourierAvailability.Available);
             Order nearbyOrder = WaitingOrder(business.Id, nearbyBranch.Id, "NEAR", "Gizli Müşteri",
                 "05550001122", "Gizli teslimat adresi");
             Order farOrder = WaitingOrder(business.Id, farBranch.Id, "FAR", "Uzak Müşteri",
                 "05550003344", "Uzak teslimat adresi");
             context.AddRange(business, nearbyBranch, farBranch, courier, nearbyOrder, farOrder,
+                CourierShift.Start(courier.Id, business.Id, DateTimeOffset.UtcNow.AddHours(-1)),
                 CourierLocation.Create(courier.Id, business.Id, 40.9911, 29.0290, 5, null, null,
                     DateTimeOffset.UtcNow));
             await context.SaveChangesAsync();
@@ -296,6 +300,63 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
     }
 
     [Fact]
+    public async Task Branch_scoped_user_cannot_access_objects_from_another_branch_by_id()
+    {
+        Guid businessId;
+        Guid ownBranchId;
+        Guid otherBranchId;
+        Guid otherCourierId;
+        Guid otherOrderId;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            CoreDbContext context = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Business business = Business.Create($"Branch scope {Guid.NewGuid():N}", $"B{Guid.NewGuid():N}"[..12]);
+            Branch ownBranch = Branch.Create(business.Id, "Kendi Şube", "Kadıköy", 40.99, 29.03);
+            Branch otherBranch = Branch.Create(business.Id, "Diğer Şube", "Beşiktaş", 41.04, 29.01);
+            Courier otherCourier = Courier.Create(business.Id, otherBranch.Id, "Diğer", "Kurye",
+                $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            Order otherOrder = WaitingOrder(business.Id, otherBranch.Id, "OTHER-BRANCH",
+                "Gizli Müşteri", "05550001234", "Gizli adres");
+            context.AddRange(business, ownBranch, otherBranch, otherCourier, otherOrder,
+                CourierLocation.Create(otherCourier.Id, business.Id, 41.041, 29.011, 5, null, null,
+                    DateTimeOffset.UtcNow));
+            await context.SaveChangesAsync();
+            businessId = business.Id;
+            ownBranchId = ownBranch.Id;
+            otherBranchId = otherBranch.Id;
+            otherCourierId = otherCourier.Id;
+            otherOrderId = otherOrder.Id;
+        }
+
+        HttpRequestMessage Scoped(HttpMethod method, string path, string permission)
+        {
+            HttpRequestMessage request = Authorized(method, path, permission);
+            request.Headers.Add("X-Test-Business", businessId.ToString());
+            request.Headers.Add("X-Test-Branch", ownBranchId.ToString());
+            return request;
+        }
+
+        using HttpRequestMessage orderRequest = Scoped(HttpMethod.Get, $"/api/v1/orders/{otherOrderId}",
+            Permissions.OrdersRead);
+        using HttpRequestMessage branchRequest = Scoped(HttpMethod.Get, $"/api/v1/branches/{otherBranchId}",
+            Permissions.BranchesRead);
+        using HttpRequestMessage courierRequest = Scoped(HttpMethod.Get, $"/api/v1/couriers/{otherCourierId}",
+            Permissions.CouriersRead);
+        using HttpRequestMessage locationRequest = Scoped(HttpMethod.Get,
+            $"/api/v1/locations/couriers/{otherCourierId}/history", Permissions.LocationsRead);
+
+        HttpResponseMessage[] responses =
+        [
+            await _client.SendAsync(orderRequest),
+            await _client.SendAsync(branchRequest),
+            await _client.SendAsync(courierRequest),
+            await _client.SendAsync(locationRequest)
+        ];
+
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode));
+    }
+
+    [Fact]
     public async Task Courier_queue_requires_a_fresh_location()
     {
         Guid businessId;
@@ -311,6 +372,40 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
             context.AddRange(business, branch, courier,
                 CourierLocation.Create(courier.Id, business.Id, 40.9911, 29.0290, 5, null, null,
                     DateTimeOffset.UtcNow.AddMinutes(-10)));
+            await context.SaveChangesAsync();
+            businessId = business.Id;
+            branchId = branch.Id;
+            courierId = courier.Id;
+        }
+
+        using HttpRequestMessage request = Authorized(HttpMethod.Get, "/api/v1/orders/available",
+            Permissions.OrdersClaim);
+        request.Headers.Add("X-Test-Permission", Permissions.OrdersRead);
+        request.Headers.Add("X-Test-Business", businessId.ToString());
+        request.Headers.Add("X-Test-Branch", branchId.ToString());
+        request.Headers.Add("X-Test-Courier", courierId.ToString());
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Courier_queue_requires_an_active_shift_even_with_a_fresh_location()
+    {
+        Guid businessId;
+        Guid branchId;
+        Guid courierId;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            CoreDbContext context = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Business business = Business.Create($"Off shift queue {Guid.NewGuid():N}", $"O{Guid.NewGuid():N}"[..12]);
+            Branch branch = Branch.Create(business.Id, "Merkez", "Kadıköy", 40.9909, 29.0283);
+            Courier courier = Courier.Create(business.Id, branch.Id, "Mesai", "Dışı",
+                $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            context.AddRange(business, branch, courier,
+                CourierLocation.Create(courier.Id, business.Id, 40.9911, 29.0290, 5, null, null,
+                    DateTimeOffset.UtcNow));
             await context.SaveChangesAsync();
             businessId = business.Id;
             branchId = branch.Id;

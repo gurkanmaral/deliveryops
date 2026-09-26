@@ -17,7 +17,7 @@ public sealed class RecordCourierLocationHandler(ICoreDbContext context, IReques
         Courier? courier = await context.Couriers.FindAsync([request.CourierId], cancellationToken);
         if (courier is null || !courier.IsActive) return Result<CourierLocationSnapshot>.Failure(HandlerErrors.NotFound("Kurye"));
         bool isSelf = requestContext.CourierId == courier.Id;
-        if (!isSelf && !TenantAccess.CanAccess(requestContext, courier.BusinessId))
+        if (!isSelf && !TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId))
             return Result<CourierLocationSnapshot>.Failure(HandlerErrors.Forbidden);
 
         DateTimeOffset recordedAt = request.RecordedAtUtc ?? DateTimeOffset.UtcNow;
@@ -58,6 +58,8 @@ public sealed class GetLatestCourierLocationsHandler(ICoreDbContext context, IRe
 
         IQueryable<Courier> courierQuery = context.Couriers.AsNoTracking().Where(x => x.IsActive);
         if (businessId.HasValue) courierQuery = courierQuery.Where(x => x.BusinessId == businessId.Value);
+        if (requestContext.BranchId.HasValue)
+            courierQuery = courierQuery.Where(x => x.BranchId == requestContext.BranchId.Value);
         List<Courier> couriers = await courierQuery.ToListAsync(cancellationToken);
         IReadOnlyDictionary<Guid, CourierLocationSnapshot> cached = await presenceStore.GetAsync(couriers.Select(x => x.Id), cancellationToken);
         Guid[] missingIds = couriers.Where(x => !cached.ContainsKey(x.Id)).Select(x => x.Id).ToArray();
@@ -98,7 +100,7 @@ public sealed class GetCourierLocationHistoryHandler(ICoreDbContext context, IRe
     {
         Courier? courier = await context.Couriers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.CourierId, cancellationToken);
         if (courier is null) return Result<PagedResponse<CourierLocationPoint>>.Failure(HandlerErrors.NotFound("Kurye"));
-        if (!TenantAccess.CanAccess(requestContext, courier.BusinessId) && requestContext.CourierId != courier.Id)
+        if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId) && requestContext.CourierId != courier.Id)
             return Result<PagedResponse<CourierLocationPoint>>.Failure(HandlerErrors.Forbidden);
         DateTimeOffset from = request.FromUtc ?? DateTimeOffset.UtcNow.AddHours(-8);
         DateTimeOffset to = request.ToUtc ?? DateTimeOffset.UtcNow;

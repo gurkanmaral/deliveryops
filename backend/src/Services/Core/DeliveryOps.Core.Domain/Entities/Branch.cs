@@ -28,6 +28,7 @@ public sealed class Branch : Entity
         if (businessId == Guid.Empty) throw new ArgumentException("Business is required.", nameof(businessId));
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(address);
+        ValidateCoordinates(latitude, longitude);
         return new Branch(businessId, name.Trim(), address.Trim(), latitude, longitude);
     }
 
@@ -35,11 +36,25 @@ public sealed class Branch : Entity
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(address);
+        ValidateCoordinates(latitude, longitude);
         Name = name.Trim();
         Address = address.Trim();
         Latitude = latitude;
         Longitude = longitude;
         MarkAsUpdated();
+    }
+
+    private static void ValidateCoordinates(double? latitude, double? longitude)
+    {
+        if (latitude.HasValue != longitude.HasValue)
+            throw new ArgumentException("Branch latitude and longitude must be supplied together.");
+        if (!latitude.HasValue) return;
+        if (!double.IsFinite(latitude.Value) || latitude is < -90 or > 90)
+            throw new ArgumentOutOfRangeException(nameof(latitude));
+        if (!double.IsFinite(longitude!.Value) || longitude is < -180 or > 180)
+            throw new ArgumentOutOfRangeException(nameof(longitude));
+        if (latitude == 0 && longitude == 0)
+            throw new ArgumentException("Branch coordinates cannot be the null island coordinate.");
     }
 
     public void Deactivate() { IsActive = false; MarkAsUpdated(); }

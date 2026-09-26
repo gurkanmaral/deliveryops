@@ -34,7 +34,7 @@ public sealed class GetBranchHandler(ICoreDbContext context, IRequestContext req
     {
         Branch? branch = await context.Branches.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (branch is null) return Result<BranchResponse>.Failure(HandlerErrors.NotFound("Şube"));
-        if (!TenantAccess.CanAccess(requestContext, branch.BusinessId)) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, branch.BusinessId, branch.Id)) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
         return Result<BranchResponse>.Success(BranchMapper.Map(branch));
     }
 }
@@ -45,6 +45,7 @@ public sealed class CreateBranchHandler(ICoreDbContext context, IRequestContext 
     public async Task<Result<BranchResponse>> Handle(CreateBranchCommand request, CancellationToken cancellationToken)
     {
         if (!TenantAccess.CanAccess(requestContext, request.BusinessId)) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
+        if (requestContext.BranchId.HasValue) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
         if (!await context.Businesses.AnyAsync(x => x.Id == request.BusinessId && x.IsActive, cancellationToken))
             return Result<BranchResponse>.Failure(HandlerErrors.NotFound("İşletme"));
 
@@ -62,7 +63,7 @@ public sealed class UpdateBranchHandler(ICoreDbContext context, IRequestContext 
     {
         Branch? branch = await context.Branches.FindAsync([request.Id], cancellationToken);
         if (branch is null) return Result<BranchResponse>.Failure(HandlerErrors.NotFound("Şube"));
-        if (!TenantAccess.CanAccess(requestContext, branch.BusinessId)) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, branch.BusinessId, branch.Id)) return Result<BranchResponse>.Failure(HandlerErrors.Forbidden);
         branch.Update(request.Name, request.Address, request.Latitude, request.Longitude);
         await context.SaveChangesAsync(cancellationToken);
         return Result<BranchResponse>.Success(BranchMapper.Map(branch));
@@ -76,7 +77,7 @@ public sealed class DeactivateBranchHandler(ICoreDbContext context, IRequestCont
     {
         Branch? branch = await context.Branches.FindAsync([request.Id], cancellationToken);
         if (branch is null) return Result.Failure(HandlerErrors.NotFound("Şube"));
-        if (!TenantAccess.CanAccess(requestContext, branch.BusinessId)) return Result.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, branch.BusinessId, branch.Id)) return Result.Failure(HandlerErrors.Forbidden);
         branch.Deactivate();
         await context.SaveChangesAsync(cancellationToken);
         return Result.Success();

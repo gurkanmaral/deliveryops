@@ -86,7 +86,7 @@ public sealed class GetOrderHandler(ICoreDbContext context, IRequestContext requ
     {
         Order? order = await context.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId)
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         OrderDispatchState? dispatchState = await context.OrderDispatchStates.AsNoTracking()
@@ -106,6 +106,8 @@ public sealed class CreateOrderHandler(ICoreDbContext context, IRequestContext r
     public async Task<Result<OrderResponse>> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
     {
         if (!request.IsTrustedIntegration && !TenantAccess.CanAccess(requestContext, request.BusinessId))
+            return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!request.IsTrustedIntegration && requestContext.BranchId.HasValue && requestContext.BranchId != request.BranchId)
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (!await context.Branches.AnyAsync(x => x.Id == request.BranchId && x.BusinessId == request.BusinessId && x.IsActive, cancellationToken))
             return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Şube"));
@@ -171,7 +173,7 @@ public sealed class UpdateOrderHandler(ICoreDbContext context, IRequestContext r
     {
         Order? order = await context.Orders.FindAsync([request.Id], cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         try { order.UpdateCustomer(request.CustomerName, request.CustomerPhone, request.DeliveryAddress,
             request.TotalAmount, request.DeliveryLatitude, request.DeliveryLongitude, request.DeliveryInstructions,
             request.DeliveryLocationSource, request.DeliveryLocationAccuracy); }
@@ -190,7 +192,7 @@ public sealed class AssignOrderCourierHandler(ICoreDbContext context, IRequestCo
     {
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (order.DeliveryFulfillment != DeliveryFulfillmentType.MerchantCourier)
             return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Bu sipariş sağlayıcı kuryesi veya gel-al modeliyle teslim edilecek."));
         Courier? courier = await context.Couriers.SingleOrDefaultAsync(x => x.Id == request.CourierId && x.IsActive, cancellationToken);
@@ -322,6 +324,11 @@ public sealed class GetAvailableOrdersHandler(ICoreDbContext context, IRequestCo
             .SingleOrDefaultAsync(x => x.Id == courierId && x.BusinessId == businessId && x.IsActive, cancellationToken);
         if (courier is null)
             return Result<PagedResponse<AvailableOrderResponse>>.Failure(HandlerErrors.NotFound("Kurye"));
+        bool isOnShift = await context.CourierShifts.AsNoTracking()
+            .AnyAsync(x => x.CourierId == courierId && x.EndedAtUtc == null, cancellationToken);
+        if (!isOnShift || courier.Availability is CourierAvailability.Offline or CourierAvailability.OffShift or CourierAvailability.OnBreak)
+            return Result<PagedResponse<AvailableOrderResponse>>.Failure(
+                HandlerErrors.Conflict("Yakındaki paketleri görmek için aktif mesaide ve müsait olmalısınız."));
 
         BusinessDispatchSettings? settings = await context.BusinessDispatchSettings.AsNoTracking()
             .SingleOrDefaultAsync(x => x.BusinessId == businessId, cancellationToken);
@@ -419,7 +426,7 @@ public sealed class ChangeOrderStatusHandler(ICoreDbContext context, IRequestCon
     {
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId)
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (request.Status is OrderStatus.Cancelled or OrderStatus.DeliveryFailed)
@@ -475,7 +482,7 @@ public sealed class CancelOrderHandler(ICoreDbContext context, IRequestContext r
     {
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         BusinessCreditAccount? creditAccount = await context.BusinessCreditAccounts
             .SingleOrDefaultAsync(x => x.BusinessId == order.BusinessId, cancellationToken);
         if (creditAccount is null)
@@ -516,7 +523,7 @@ public sealed class ReportDeliveryFailureHandler(ICoreDbContext context, IReques
     {
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
-        if (!TenantAccess.CanAccess(requestContext, order.BusinessId) ||
+        if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId) ||
             (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId))
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         try { order.ReportDeliveryFailure(request.Reason, requestContext.UserId); }
