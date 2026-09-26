@@ -116,6 +116,31 @@ public sealed class PostgresPersistenceTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Xmin_prevents_concurrent_courier_assignment_reservations()
+    {
+        (Guid businessId, Guid branchId) = await SeedBusinessAsync();
+        Guid courierId;
+        await using (CoreDbContext seed = fixture.CreateContext())
+        {
+            Courier courier = Courier.Create(businessId, branchId, "Eşzamanlı", "Kurye",
+                $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            seed.Couriers.Add(courier);
+            await seed.SaveChangesAsync();
+            courierId = courier.Id;
+        }
+
+        await using CoreDbContext first = fixture.CreateContext();
+        await using CoreDbContext second = fixture.CreateContext();
+        Courier firstCourier = await first.Couriers.SingleAsync(x => x.Id == courierId);
+        Courier secondCourier = await second.Couriers.SingleAsync(x => x.Id == courierId);
+        firstCourier.ReserveAssignmentSlot();
+        secondCourier.ReserveAssignmentSlot();
+
+        await first.SaveChangesAsync();
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => second.SaveChangesAsync());
+    }
+
+    [Fact]
     public async Task Order_pii_is_encrypted_at_rest_and_decrypted_on_read()
     {
         (Guid businessId, Guid branchId) = await SeedBusinessAsync();

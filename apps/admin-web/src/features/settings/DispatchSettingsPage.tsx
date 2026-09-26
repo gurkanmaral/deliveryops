@@ -16,12 +16,15 @@ interface DispatchSettings {
   requireFreshLocation: boolean
   locationFreshnessMinutes: number
   assignmentRadiusKm?: number
+  preferDeliveryClusters: boolean
+  deliveryClusterRadiusKm: number
 }
 
 const initialSettings: DispatchSettings = {
   businessId: '', autoConfirmOrders: false, autoAssignCouriers: false,
   allowCourierSelfClaim: true, preferBranchCouriers: true, maxActiveOrdersPerCourier: 2,
   requireFreshLocation: false, locationFreshnessMinutes: 5,
+  preferDeliveryClusters: true, deliveryClusterRadiusKm: 2,
 }
 
 export function DispatchSettingsPage() {
@@ -81,7 +84,9 @@ export function DispatchSettingsPage() {
           <SettingToggle checked={form.requireFreshLocation} title="Güncel konum zorunlu" description="Eski veya konumu olmayan kuryeleri aday listesinden çıkarır." onChange={() => toggle('requireFreshLocation')} compact />
           <label>Konum geçerlilik süresi (dk)<input type="number" min="1" max="120" value={form.locationFreshnessMinutes} onChange={event => setForm(current => ({ ...current, locationFreshnessMinutes: Number(event.target.value) }))} /></label>
           <label>Azami atama mesafesi (km)<input type="number" min="0.1" max="200" step="0.1" placeholder="Sınırsız" value={form.assignmentRadiusKm ?? ''} onChange={event => setForm(current => ({ ...current, assignmentRadiusKm: event.target.value ? Number(event.target.value) : undefined }))} /></label>
-          <p className="settings-hint">Mesafe hesabı kuryenin son konumu ile siparişin alınacağı şube arasında yapılır. Mesafe sınırı için şube koordinatı gereklidir.</p>
+          <SettingToggle checked={form.preferDeliveryClusters} title="Aynı bölge paketlerini grupla" description="Yakın teslimat adreslerini kapasitesi uygun olan aynı kuryede toplar." onChange={() => toggle('preferDeliveryClusters')} compact />
+          <label>Teslimat gruplama yarıçapı (km)<input type="number" min="0.1" max="25" step="0.1" value={form.deliveryClusterRadiusKm} disabled={!form.preferDeliveryClusters} onChange={event => setForm(current => ({ ...current, deliveryClusterRadiusKm: Number(event.target.value) }))} /></label>
+          <p className="settings-hint">Alım mesafesi kuryenin son konumu ile şube arasında, rota gruplaması ise aktif paketlerin teslimat koordinatları arasında hesaplanır. Koordinatı olmayan siparişler rota grubuna alınmaz.</p>
         </div>
       </article>
 

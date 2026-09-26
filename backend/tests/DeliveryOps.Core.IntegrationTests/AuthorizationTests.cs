@@ -250,6 +250,52 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
     }
 
     [Fact]
+    public async Task Courier_regular_order_endpoints_do_not_expose_unassigned_order_pii()
+    {
+        Guid businessId;
+        Guid branchId;
+        Guid courierId;
+        Guid orderId;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            CoreDbContext context = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Business business = Business.Create($"PII boundary {Guid.NewGuid():N}", $"P{Guid.NewGuid():N}"[..12]);
+            Branch branch = Branch.Create(business.Id, "Merkez", "Kadıköy", 40.9909, 29.0283);
+            Courier courier = Courier.Create(business.Id, branch.Id, "Test", "Kurye",
+                $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            Order order = WaitingOrder(business.Id, branch.Id, "PRIVATE", "Gizli Müşteri",
+                "05550001122", "Gizli teslimat adresi");
+            context.AddRange(business, branch, courier, order);
+            await context.SaveChangesAsync();
+            businessId = business.Id;
+            branchId = branch.Id;
+            courierId = courier.Id;
+            orderId = order.Id;
+        }
+
+        using HttpRequestMessage listRequest = Authorized(HttpMethod.Get, "/api/v1/orders?pageSize=100",
+            Permissions.OrdersRead);
+        listRequest.Headers.Add("X-Test-Business", businessId.ToString());
+        listRequest.Headers.Add("X-Test-Branch", branchId.ToString());
+        listRequest.Headers.Add("X-Test-Courier", courierId.ToString());
+        HttpResponseMessage listResponse = await _client.SendAsync(listRequest);
+        string listJson = await listResponse.Content.ReadAsStringAsync();
+
+        using HttpRequestMessage detailRequest = Authorized(HttpMethod.Get, $"/api/v1/orders/{orderId}",
+            Permissions.OrdersRead);
+        detailRequest.Headers.Add("X-Test-Business", businessId.ToString());
+        detailRequest.Headers.Add("X-Test-Branch", branchId.ToString());
+        detailRequest.Headers.Add("X-Test-Courier", courierId.ToString());
+        HttpResponseMessage detailResponse = await _client.SendAsync(detailRequest);
+
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        Assert.DoesNotContain("Gizli Müşteri", listJson);
+        Assert.DoesNotContain("05550001122", listJson);
+        Assert.DoesNotContain("Gizli teslimat adresi", listJson);
+        Assert.Equal(HttpStatusCode.Forbidden, detailResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task Courier_queue_requires_a_fresh_location()
     {
         Guid businessId;

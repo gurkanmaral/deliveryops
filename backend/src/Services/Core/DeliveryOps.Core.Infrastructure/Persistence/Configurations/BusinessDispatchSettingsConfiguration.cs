@@ -11,6 +11,8 @@ internal sealed class BusinessDispatchSettingsConfiguration : IEntityTypeConfigu
         builder.ToTable("business_dispatch_settings");
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => x.BusinessId).IsUnique();
+        builder.Property(x => x.PreferDeliveryClusters).HasDefaultValue(true);
+        builder.Property(x => x.DeliveryClusterRadiusKm).HasDefaultValue(2d);
         builder.HasOne<Business>().WithOne().HasForeignKey<BusinessDispatchSettings>(x => x.BusinessId)
             .OnDelete(DeleteBehavior.Cascade);
     }

@@ -40,4 +40,32 @@ public sealed class CourierAssignmentRankerTests
 
         Assert.Null(CourierAssignmentRanker.SelectBest([candidate], criteria));
     }
+
+    [Fact]
+    public void SelectBest_PrefersCourierAlreadyDeliveringToSameArea()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid branchId = Guid.NewGuid();
+        CourierAssignmentCandidate idleCourier = new(Guid.NewGuid(), branchId, 0, 41, 29, now, null);
+        CourierAssignmentCandidate clusteredCourier = new(Guid.NewGuid(), branchId, 1, 41.01, 29.01, now, 0.8);
+        CourierAssignmentCriteria criteria = new(branchId, 41, 29, false, 3, true, 5, 20, now, true, 2);
+
+        CourierAssignmentCandidate? selected = CourierAssignmentRanker.SelectBest([idleCourier, clusteredCourier], criteria);
+
+        Assert.Equal(clusteredCourier.CourierId, selected?.CourierId);
+    }
+
+    [Fact]
+    public void SelectBest_DoesNotClusterOutsideConfiguredRadius()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid branchId = Guid.NewGuid();
+        CourierAssignmentCandidate idleCourier = new(Guid.NewGuid(), branchId, 0, 41, 29, now, null);
+        CourierAssignmentCandidate distantCourier = new(Guid.NewGuid(), branchId, 1, 41.01, 29.01, now, 3);
+        CourierAssignmentCriteria criteria = new(branchId, 41, 29, false, 3, true, 5, 20, now, true, 2);
+
+        CourierAssignmentCandidate? selected = CourierAssignmentRanker.SelectBest([distantCourier, idleCourier], criteria);
+
+        Assert.Equal(idleCourier.CourierId, selected?.CourierId);
+    }
 }

@@ -109,16 +109,36 @@ public sealed class Order : Entity
         return order;
     }
 
-    public void UpdateCustomer(string customerName, string customerPhone, string deliveryAddress, decimal totalAmount)
+    public void UpdateCustomer(string customerName, string customerPhone, string deliveryAddress, decimal totalAmount,
+        double? deliveryLatitude = null, double? deliveryLongitude = null, string? deliveryInstructions = null,
+        DeliveryLocationSource deliveryLocationSource = DeliveryLocationSource.Unknown,
+        DeliveryLocationAccuracy deliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown)
     {
-        if (Status is OrderStatus.Delivered or OrderStatus.Cancelled) throw new InvalidOperationException("Completed orders cannot be edited.");
+        if (Status is OrderStatus.PickedUp or OrderStatus.OnTheWay or OrderStatus.DeliveryFailed or
+            OrderStatus.Delivered or OrderStatus.Cancelled or OrderStatus.Returned)
+            throw new InvalidOperationException("Orders cannot be edited after pickup.");
         ArgumentException.ThrowIfNullOrWhiteSpace(customerName);
         ArgumentException.ThrowIfNullOrWhiteSpace(customerPhone);
         ArgumentException.ThrowIfNullOrWhiteSpace(deliveryAddress);
         if (totalAmount < 0) throw new ArgumentOutOfRangeException(nameof(totalAmount));
+        ValidateDeliveryLocation(deliveryLatitude, deliveryLongitude, deliveryLocationSource,
+            deliveryLocationAccuracy);
+        bool addressChanged = !string.Equals(DeliveryAddress, deliveryAddress.Trim(), StringComparison.Ordinal);
         CustomerName = customerName.Trim();
         CustomerPhone = customerPhone.Trim();
         DeliveryAddress = deliveryAddress.Trim();
+        if (deliveryLatitude.HasValue || addressChanged)
+        {
+            DeliveryLatitude = deliveryLatitude;
+            DeliveryLongitude = deliveryLongitude;
+            DeliveryInstructions = NormalizeOptional(deliveryInstructions);
+            DeliveryLocationSource = deliveryLocationSource;
+            DeliveryLocationAccuracy = deliveryLocationAccuracy;
+        }
+        else if (deliveryInstructions is not null)
+        {
+            DeliveryInstructions = NormalizeOptional(deliveryInstructions);
+        }
         TotalAmount = totalAmount;
         MarkAsUpdated();
     }

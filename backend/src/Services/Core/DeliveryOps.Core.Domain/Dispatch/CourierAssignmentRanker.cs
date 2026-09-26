@@ -6,7 +6,8 @@ public sealed record CourierAssignmentCandidate(
     int ActiveOrderCount,
     double? Latitude,
     double? Longitude,
-    DateTimeOffset? LocationRecordedAtUtc);
+    DateTimeOffset? LocationRecordedAtUtc,
+    double? NearestActiveDeliveryDistanceKm = null);
 
 public sealed record CourierAssignmentCriteria(
     Guid OrderBranchId,
@@ -17,7 +18,9 @@ public sealed record CourierAssignmentCriteria(
     bool RequireFreshLocation,
     int LocationFreshnessMinutes,
     double? AssignmentRadiusKm,
-    DateTimeOffset Now);
+    DateTimeOffset Now,
+    bool PreferDeliveryClusters = true,
+    double DeliveryClusterRadiusKm = 2);
 
 public static class CourierAssignmentRanker
 {
@@ -30,6 +33,10 @@ public static class CourierAssignmentRanker
             .Select(candidate => new RankedCandidate(candidate, DistanceFromPickup(candidate, criteria)))
             .Where(candidate => IsLocationEligible(candidate, criteria))
             .OrderBy(candidate => criteria.PreferBranchCouriers && candidate.Value.BranchId != criteria.OrderBranchId ? 1 : 0)
+            .ThenBy(candidate => IsDeliveryClusterMatch(candidate.Value, criteria) ? 0 : 1)
+            .ThenBy(candidate => IsDeliveryClusterMatch(candidate.Value, criteria)
+                ? candidate.Value.NearestActiveDeliveryDistanceKm!.Value
+                : double.MaxValue)
             .ThenBy(candidate => candidate.Value.ActiveOrderCount)
             .ThenBy(candidate => candidate.DistanceKm ?? double.MaxValue)
             .ThenByDescending(candidate => candidate.Value.LocationRecordedAtUtc)
@@ -37,6 +44,12 @@ public static class CourierAssignmentRanker
             .Select(candidate => candidate.Value)
             .FirstOrDefault();
     }
+
+    private static bool IsDeliveryClusterMatch(CourierAssignmentCandidate candidate,
+        CourierAssignmentCriteria criteria) =>
+        criteria.PreferDeliveryClusters && candidate.ActiveOrderCount > 0 &&
+        candidate.NearestActiveDeliveryDistanceKm.HasValue &&
+        candidate.NearestActiveDeliveryDistanceKm.Value <= criteria.DeliveryClusterRadiusKm;
 
     private static bool IsLocationEligible(RankedCandidate candidate, CourierAssignmentCriteria criteria)
     {

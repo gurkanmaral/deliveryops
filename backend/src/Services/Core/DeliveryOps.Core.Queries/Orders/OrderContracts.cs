@@ -79,7 +79,11 @@ public sealed record CreateOrderCommand(
     DeliveryLocationSource DeliveryLocationSource = DeliveryLocationSource.Unknown,
     DeliveryLocationAccuracy DeliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown,
     DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier) : IRequest<Result<OrderResponse>>;
-public sealed record UpdateOrderCommand(Guid Id, string CustomerName, string CustomerPhone, string DeliveryAddress, decimal TotalAmount)
+public sealed record UpdateOrderCommand(Guid Id, string CustomerName, string CustomerPhone, string DeliveryAddress,
+    decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
+    string? DeliveryInstructions = null,
+    DeliveryLocationSource DeliveryLocationSource = DeliveryLocationSource.Unknown,
+    DeliveryLocationAccuracy DeliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown)
     : IRequest<Result<OrderResponse>>;
 public sealed record AssignOrderCourierCommand(Guid Id, Guid CourierId) : IRequest<Result<OrderResponse>>;
 public sealed record ClaimOrderCommand(Guid Id) : IRequest<Result<OrderResponse>>;

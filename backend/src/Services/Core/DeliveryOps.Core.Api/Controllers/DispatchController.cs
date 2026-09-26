@@ -50,9 +50,10 @@ public sealed class DispatchController(ISender sender) : ApiControllerBase
         FromResult(await sender.Send(new UpdateDispatchSettingsCommand(request.BusinessId, request.AutoConfirmOrders,
             request.AutoAssignCouriers, request.AllowCourierSelfClaim, request.PreferBranchCouriers,
             request.MaxActiveOrdersPerCourier, request.RequireFreshLocation, request.LocationFreshnessMinutes,
-            request.AssignmentRadiusKm), cancellationToken));
+            request.AssignmentRadiusKm, request.PreferDeliveryClusters, request.DeliveryClusterRadiusKm), cancellationToken));
 }
 
 public sealed record UpdateDispatchSettingsRequest(Guid? BusinessId, bool AutoConfirmOrders, bool AutoAssignCouriers,
     bool AllowCourierSelfClaim, bool PreferBranchCouriers, int MaxActiveOrdersPerCourier,
-    bool RequireFreshLocation, int LocationFreshnessMinutes, double? AssignmentRadiusKm);
+    bool RequireFreshLocation, int LocationFreshnessMinutes, double? AssignmentRadiusKm,
+    bool PreferDeliveryClusters = true, double DeliveryClusterRadiusKm = 2);

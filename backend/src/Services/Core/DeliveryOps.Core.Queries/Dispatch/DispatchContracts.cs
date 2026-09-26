@@ -13,7 +13,9 @@ public sealed record DispatchSettingsResponse(
     int MaxActiveOrdersPerCourier,
     bool RequireFreshLocation,
     int LocationFreshnessMinutes,
-    double? AssignmentRadiusKm);
+    double? AssignmentRadiusKm,
+    bool PreferDeliveryClusters,
+    double DeliveryClusterRadiusKm);
 
 public sealed record GetDispatchSettingsQuery(Guid? BusinessId) : IRequest<Result<DispatchSettingsResponse>>;
 
@@ -26,7 +28,9 @@ public sealed record UpdateDispatchSettingsCommand(
     int MaxActiveOrdersPerCourier,
     bool RequireFreshLocation,
     int LocationFreshnessMinutes,
-    double? AssignmentRadiusKm) : IRequest<Result<DispatchSettingsResponse>>;
+    double? AssignmentRadiusKm,
+    bool PreferDeliveryClusters,
+    double DeliveryClusterRadiusKm) : IRequest<Result<DispatchSettingsResponse>>;
 
 public sealed record DispatchQueueItemResponse(
     Guid OrderId,
@@ -48,7 +52,8 @@ public sealed record CourierSuggestionResponse(
     bool IsBranchCourier,
     int ActiveOrderCount,
     double? DistanceKm,
-    DateTimeOffset? LocationRecordedAtUtc);
+    DateTimeOffset? LocationRecordedAtUtc,
+    double? DeliveryClusterDistanceKm = null);
 
 public sealed record DispatchAttemptResponse(
     Guid Id,

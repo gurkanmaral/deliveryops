@@ -130,6 +130,51 @@ public sealed class OrderTests
     }
 
     [Fact]
+    public void UpdateCustomer_ClearsStaleCoordinatesWhenAddressChangesWithoutCoordinates()
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), string.Empty, "Ada Lovelace",
+            "+905555555555", "Eski adres", OrderSource.Phone, 250m,
+            Guid.NewGuid().ToString("N"), new string('A', 64), Guid.NewGuid(), 40.99, 29.03,
+            "Eski talimat", DeliveryLocationSource.MapPin, DeliveryLocationAccuracy.Exact);
+
+        order.UpdateCustomer("Ada Lovelace", "+905555555555", "Yeni adres", 250m);
+
+        Assert.Equal("Yeni adres", order.DeliveryAddress);
+        Assert.Null(order.DeliveryLatitude);
+        Assert.Null(order.DeliveryLongitude);
+        Assert.Null(order.DeliveryInstructions);
+        Assert.Equal(DeliveryLocationSource.Unknown, order.DeliveryLocationSource);
+    }
+
+    [Fact]
+    public void UpdateCustomer_RejectsAddressChangesAfterPickup()
+    {
+        Order order = CreateOrder();
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+        order.AssignCourier(Guid.NewGuid(), userId);
+        order.ChangeStatus(OrderStatus.PickedUp, userId);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            order.UpdateCustomer("Ada", "05550000000", "Başka adres", 250m));
+    }
+
+    [Fact]
+    public void UpdateCustomer_PreservesCoordinatesWhenAddressIsUnchanged()
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), string.Empty, "Ada Lovelace",
+            "+905555555555", "Aynı adres", OrderSource.Phone, 250m,
+            Guid.NewGuid().ToString("N"), new string('A', 64), Guid.NewGuid(), 40.99, 29.03,
+            "Kapı 2", DeliveryLocationSource.MapPin, DeliveryLocationAccuracy.Exact);
+
+        order.UpdateCustomer("Ada Byron", "+905555555556", "Aynı adres", 300m);
+
+        Assert.Equal(40.99, order.DeliveryLatitude);
+        Assert.Equal(29.03, order.DeliveryLongitude);
+        Assert.Equal("Kapı 2", order.DeliveryInstructions);
+    }
+
+    [Fact]
     public void Provider_courier_order_can_follow_provider_delivery_lifecycle_without_local_courier()
     {
         Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), "TGO-1", "Ada", "05550000000",

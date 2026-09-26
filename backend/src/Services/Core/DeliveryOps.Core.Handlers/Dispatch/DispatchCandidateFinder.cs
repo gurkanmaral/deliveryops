@@ -30,6 +30,21 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
             .Select(group => new { CourierId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.CourierId, x => x.Count, cancellationToken);
 
+        Dictionary<Guid, double?> clusterDistances = courierIds.ToDictionary(x => x, _ => (double?)null);
+        if (settings.PreferDeliveryClusters && order.DeliveryLatitude.HasValue && order.DeliveryLongitude.HasValue)
+        {
+            var activeDeliveries = await context.Orders.AsNoTracking()
+                .Where(x => x.Id != order.Id && x.CourierId.HasValue && courierIds.Contains(x.CourierId.Value) &&
+                            ActiveOrderStatuses.Contains(x.Status) && x.DeliveryLatitude.HasValue &&
+                            x.DeliveryLongitude.HasValue)
+                .Select(x => new { CourierId = x.CourierId!.Value, x.DeliveryLatitude, x.DeliveryLongitude })
+                .ToListAsync(cancellationToken);
+            foreach (var group in activeDeliveries.GroupBy(x => x.CourierId))
+                clusterDistances[group.Key] = group.Select(x => CourierAssignmentRanker.CalculateDistanceKm(
+                        x.DeliveryLatitude, x.DeliveryLongitude, order.DeliveryLatitude, order.DeliveryLongitude))
+                    .Where(x => x.HasValue).Select(x => x!.Value).DefaultIfEmpty(double.MaxValue).Min();
+        }
+
         var latestTimes = context.CourierLocations.AsNoTracking()
             .Where(x => courierIds.Contains(x.CourierId))
             .GroupBy(x => x.CourierId)
@@ -47,11 +62,13 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
         {
             latestLocations.TryGetValue(courier.Id, out CourierLocation? location);
             return new CourierAssignmentCandidate(courier.Id, courier.BranchId, activeCounts.GetValueOrDefault(courier.Id),
-                location?.Position.Y, location?.Position.X, location?.RecordedAtUtc);
+                location?.Position.Y, location?.Position.X, location?.RecordedAtUtc,
+                clusterDistances.GetValueOrDefault(courier.Id));
         }).ToList();
         CourierAssignmentCriteria criteria = new(order.BranchId, branch.Latitude, branch.Longitude,
             settings.PreferBranchCouriers, settings.MaxActiveOrdersPerCourier, settings.RequireFreshLocation,
-            settings.LocationFreshnessMinutes, settings.AssignmentRadiusKm, timeProvider.GetUtcNow());
+            settings.LocationFreshnessMinutes, settings.AssignmentRadiusKm, timeProvider.GetUtcNow(),
+            settings.PreferDeliveryClusters, settings.DeliveryClusterRadiusKm);
 
         List<CourierSuggestionResponse> result = [];
         while (remaining.Count > 0)
@@ -64,7 +81,11 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
             result.Add(new CourierSuggestionResponse(result.Count + 1, courier.Id,
                 $"{courier.FirstName} {courier.LastName}", courier.BranchId, courier.BranchId == order.BranchId,
                 selected.ActiveOrderCount, distance.HasValue ? Math.Round(distance.Value, 2) : null,
-                selected.LocationRecordedAtUtc));
+                selected.LocationRecordedAtUtc,
+                selected.NearestActiveDeliveryDistanceKm.HasValue &&
+                selected.NearestActiveDeliveryDistanceKm.Value != double.MaxValue
+                    ? Math.Round(selected.NearestActiveDeliveryDistanceKm.Value, 2)
+                    : null));
             remaining.Remove(selected);
         }
         return result;

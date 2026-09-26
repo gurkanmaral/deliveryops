@@ -3,8 +3,9 @@ import { orderSourceLabels, orderStatusLabels } from '@/shared/labels';
 import { OrderStatus, type Order } from '@/shared/types';
 import { colors, type Tone } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 const actionLabels: Partial<Record<OrderStatus, string>> = {
   [OrderStatus.PickedUp]: 'Paketi aldım', [OrderStatus.OnTheWay]: 'Teslimata başla',
@@ -34,7 +35,8 @@ export function OrderCard({ order, available, busy, highlighted, onClaim, onTran
   const destination = order.deliveryLatitude !== null && order.deliveryLongitude !== null
     ? `${order.deliveryLatitude},${order.deliveryLongitude}`
     : order.deliveryAddress;
-  const navigate = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`).catch(() => Alert.alert('Harita açılamadı'));
+  const navigate = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate`)
+    .catch(() => Alert.alert('Harita açılamadı', 'Cihazda yol tarifi açabilecek bir harita uygulaması bulunamadı.'));
   const transition = async (status: OrderStatus) => {
     try {
       await onTransition?.(status);

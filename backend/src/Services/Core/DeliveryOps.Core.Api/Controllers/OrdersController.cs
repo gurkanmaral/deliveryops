@@ -77,7 +77,11 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
     [HttpPut("{id:guid}")]
     [Authorize(Policy = Permissions.OrdersWrite)]
     public async Task<ActionResult<OrderResponse>> Update(Guid id, UpdateOrderRequest request, CancellationToken cancellationToken) =>
-        FromResult(await sender.Send(new UpdateOrderCommand(id, request.CustomerName, request.CustomerPhone, request.DeliveryAddress, request.TotalAmount), cancellationToken));
+        FromResult(await sender.Send(new UpdateOrderCommand(id, request.CustomerName, request.CustomerPhone,
+            request.DeliveryAddress, request.TotalAmount, request.DeliveryLatitude, request.DeliveryLongitude,
+            request.DeliveryInstructions,
+            request.DeliveryLatitude.HasValue ? DeliveryLocationSource.MapPin : DeliveryLocationSource.Unknown,
+            request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown), cancellationToken));
 
     [HttpPut("{id:guid}/courier")]
     [Authorize(Policy = Permissions.OrdersAssign)]
@@ -116,7 +120,9 @@ public sealed record CreateOrderRequest(Guid BusinessId, Guid BranchId, string? 
 public sealed record CreatePhoneOrderRequest(Guid BusinessId, Guid BranchId, string CustomerName, string CustomerPhone,
     string DeliveryAddress, decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
     string? DeliveryInstructions = null);
-public sealed record UpdateOrderRequest(string CustomerName, string CustomerPhone, string DeliveryAddress, decimal TotalAmount);
+public sealed record UpdateOrderRequest(string CustomerName, string CustomerPhone, string DeliveryAddress,
+    decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
+    string? DeliveryInstructions = null);
 public sealed record AssignOrderCourierRequest(Guid CourierId);
 public sealed record ChangeOrderStatusRequest(OrderStatus Status);
 public sealed record CancelOrderRequest(string? Reason);

@@ -88,6 +88,7 @@ public sealed class AutomaticDispatchWorker(
         else
         {
             Courier courier = await context.Couriers.SingleAsync(x => x.Id == selected.CourierId, cancellationToken);
+            courier.ReserveAssignmentSlot();
             order.AssignCourier(courier.Id, SystemActorId);
             context.OrderStatusHistory.Add(order.StatusHistory.Single());
             if (courier.DeliveryStatus == DeliveryStatus.WaitingForAssignment)

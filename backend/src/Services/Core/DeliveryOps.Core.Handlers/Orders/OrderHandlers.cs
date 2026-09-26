@@ -49,8 +49,7 @@ public sealed class GetOrdersHandler(ICoreDbContext context, IRequestContext req
         if (requestContext.CourierId.HasValue)
         {
             Guid courierId = requestContext.CourierId.Value;
-            query = query.Where(x => x.CourierId == courierId ||
-                (x.CourierId == null && x.Status == OrderStatus.WaitingForCourier));
+            query = query.Where(x => x.CourierId == courierId);
         }
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
@@ -88,8 +87,7 @@ public sealed class GetOrderHandler(ICoreDbContext context, IRequestContext requ
         Order? order = await context.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
         if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
-        if (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId &&
-            !(order.CourierId is null && order.Status == OrderStatus.WaitingForCourier))
+        if (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId)
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         OrderDispatchState? dispatchState = await context.OrderDispatchStates.AsNoTracking()
             .SingleOrDefaultAsync(x => x.OrderId == order.Id, cancellationToken);
@@ -174,7 +172,9 @@ public sealed class UpdateOrderHandler(ICoreDbContext context, IRequestContext r
         Order? order = await context.Orders.FindAsync([request.Id], cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));
         if (!TenantAccess.CanAccess(requestContext, order.BusinessId)) return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
-        try { order.UpdateCustomer(request.CustomerName, request.CustomerPhone, request.DeliveryAddress, request.TotalAmount); }
+        try { order.UpdateCustomer(request.CustomerName, request.CustomerPhone, request.DeliveryAddress,
+            request.TotalAmount, request.DeliveryLatitude, request.DeliveryLongitude, request.DeliveryInstructions,
+            request.DeliveryLocationSource, request.DeliveryLocationAccuracy); }
         catch (InvalidOperationException exception) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict(exception.Message)); }
         await context.SaveChangesAsync(cancellationToken);
         OrderResponse response = OrderMapper.Map(order);
@@ -208,6 +208,7 @@ public sealed class AssignOrderCourierHandler(ICoreDbContext context, IRequestCo
         int activeOrderCount = await context.Orders.CountAsync(x => x.Id != order.Id && x.CourierId == courier.Id && activeStatuses.Contains(x.Status), cancellationToken);
         if (activeOrderCount >= maxActiveOrders)
             return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Kurye aktif paket kapasitesine ulaştı."));
+        courier.ReserveAssignmentSlot();
 
         Guid? previousCourierId = order.CourierId;
         if (previousCourierId == courier.Id) return Result<OrderResponse>.Success(OrderMapper.Map(order));
@@ -271,6 +272,7 @@ public sealed class ClaimOrderHandler(ICoreDbContext context, IRequestContext re
         int activeOrderCount = await context.Orders.CountAsync(x => x.CourierId == courier.Id && activeStatuses.Contains(x.Status), cancellationToken);
         if (activeOrderCount >= (settings?.MaxActiveOrdersPerCourier ?? 2))
             return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Aktif paket kapasitenize ulaştınız."));
+        courier.ReserveAssignmentSlot();
 
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.Id, cancellationToken);
         if (order is null) return Result<OrderResponse>.Failure(HandlerErrors.NotFound("Sipariş"));

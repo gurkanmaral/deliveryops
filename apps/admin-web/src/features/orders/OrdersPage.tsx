@@ -58,6 +58,7 @@ interface CourierSuggestion {
   activeOrderCount: number
   distanceKm?: number
   locationRecordedAtUtc?: string
+  deliveryClusterDistanceKm?: number
 }
 
 interface DispatchAttempt {
@@ -250,7 +251,7 @@ function DispatchOperations({ orderId, onClose, onAssign, canAssign }: { orderId
     <div className="panel__heading"><div><h2><Sparkles size={17} className="inline-icon" /> Kurye önerileri</h2><p>#{orderId.slice(0, 8)} için canlı kapasite ve konum sıralaması</p></div><button className="icon-button" onClick={onClose} aria-label="Kapat"><X size={18} /></button></div>
     <div className="dispatch-operations__grid">
       <div className="suggestion-list">
-        {suggestions.data?.items.map(item => <div className="suggestion-row" key={item.courierId}><span className="suggestion-rank">{item.rank}</span><div><strong>{item.courierName}</strong><small>{item.isBranchCourier ? 'Şube kuryesi' : 'İşletme kuryesi'} · {item.activeOrderCount} aktif paket · {item.distanceKm == null ? 'Konum yok' : `${item.distanceKm} km`}</small></div>{canAssign && <button className="row-action row-action--primary" onClick={() => onAssign(item.courierId)}>Ata</button>}</div>)}
+        {suggestions.data?.items.map(item => <div className="suggestion-row" key={item.courierId}><span className="suggestion-rank">{item.rank}</span><div><strong>{item.courierName}</strong><small>{item.isBranchCourier ? 'Şube kuryesi' : 'İşletme kuryesi'} · {item.activeOrderCount} aktif paket · {item.distanceKm == null ? 'Konum yok' : `${item.distanceKm} km`}{item.deliveryClusterDistanceKm != null ? ` · aynı rota ${item.deliveryClusterDistanceKm} km` : ''}</small></div>{canAssign && <button className="row-action row-action--primary" onClick={() => onAssign(item.courierId)}>Ata</button>}</div>)}
         {suggestions.isLoading && <p className="empty-state">Uygun kuryeler hesaplanıyor…</p>}
         {!suggestions.isLoading && suggestions.data?.totalCount === 0 && <p className="empty-state">Şu anda kurallara uyan kurye yok.</p>}
       </div>

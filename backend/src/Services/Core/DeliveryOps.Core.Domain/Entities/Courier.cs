@@ -50,6 +50,7 @@ public sealed class Courier : Entity
     public void AssignTo(Guid businessId, Guid? branchId) { BusinessId = businessId; BranchId = branchId; MarkAsUpdated(); }
     public void SetAvailability(CourierAvailability availability) { Availability = availability; MarkAsUpdated(); }
     public void SetDeliveryStatus(DeliveryStatus status) { DeliveryStatus = status; MarkAsUpdated(); }
+    public void ReserveAssignmentSlot() => MarkAsUpdated();
     public void RecordLocation(DateTimeOffset recordedAtUtc)
     {
         if (LastLocationAtUtc.HasValue && recordedAtUtc < LastLocationAtUtc.Value) return;

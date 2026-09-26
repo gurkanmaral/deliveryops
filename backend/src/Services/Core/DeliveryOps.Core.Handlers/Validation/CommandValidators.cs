@@ -3,6 +3,7 @@ using DeliveryOps.Core.Queries.Businesses;
 using DeliveryOps.Core.Queries.Couriers;
 using DeliveryOps.Core.Queries.Orders;
 using DeliveryOps.Core.Queries.Locations;
+using DeliveryOps.Core.Domain.Enums;
 using FluentValidation;
 
 namespace DeliveryOps.Core.Handlers.Validation;
@@ -63,7 +64,22 @@ public sealed class RecordCourierLocationValidator : AbstractValidator<RecordCou
 }
 public sealed class UpdateOrderValidator : AbstractValidator<UpdateOrderCommand>
 {
-    public UpdateOrderValidator() { RuleFor(x => x.Id).NotEmpty(); RuleFor(x => x.CustomerName).NotEmpty().MaximumLength(160); RuleFor(x => x.CustomerPhone).NotEmpty().MaximumLength(30); RuleFor(x => x.DeliveryAddress).NotEmpty().MaximumLength(500); RuleFor(x => x.TotalAmount).GreaterThanOrEqualTo(0); }
+    public UpdateOrderValidator()
+    {
+        RuleFor(x => x.Id).NotEmpty(); RuleFor(x => x.CustomerName).NotEmpty().MaximumLength(160);
+        RuleFor(x => x.CustomerPhone).NotEmpty().MaximumLength(30);
+        RuleFor(x => x.DeliveryAddress).NotEmpty().MaximumLength(500);
+        RuleFor(x => x.DeliveryInstructions).MaximumLength(1000);
+        RuleFor(x => x.TotalAmount).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.DeliveryLatitude).InclusiveBetween(-90, 90).When(x => x.DeliveryLatitude.HasValue);
+        RuleFor(x => x.DeliveryLongitude).InclusiveBetween(-180, 180).When(x => x.DeliveryLongitude.HasValue);
+        RuleFor(x => x).Must(x => x.DeliveryLatitude.HasValue == x.DeliveryLongitude.HasValue)
+            .WithMessage("Teslimat enlem ve boylamı birlikte gönderilmelidir.");
+        RuleFor(x => x).Must(x => !x.DeliveryLatitude.HasValue ||
+                                  x.DeliveryLocationSource != DeliveryLocationSource.Unknown &&
+                                  x.DeliveryLocationAccuracy != DeliveryLocationAccuracy.Unknown)
+            .WithMessage("Koordinat kaynağı ve doğruluğu zorunludur.");
+    }
 }
 public sealed class ReportDeliveryFailureValidator : AbstractValidator<ReportDeliveryFailureCommand>
 {
