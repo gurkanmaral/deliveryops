@@ -283,6 +283,8 @@ public sealed class ClaimOrderHandler(ICoreDbContext context, IRequestContext re
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (order.DeliveryFulfillment != DeliveryFulfillmentType.MerchantCourier)
             return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Bu sipariş işletme kuryesi tarafından teslim edilmeyecek."));
+        if (order.Status != OrderStatus.WaitingForCourier || order.CourierId.HasValue)
+            return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Bu paket artık üstlenmeye açık değil."));
         Result<double> proximity = await CourierOrderProximity.GetPickupDistanceAsync(context, courier.Id,
             order.BranchId, settings, timeProvider.GetUtcNow(), cancellationToken);
         if (proximity.IsFailure) return Result<OrderResponse>.Failure(proximity.Error);
@@ -431,11 +433,15 @@ public sealed class ChangeOrderStatusHandler(ICoreDbContext context, IRequestCon
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
         if (request.Status is OrderStatus.Cancelled or OrderStatus.DeliveryFailed)
             return Result<OrderResponse>.Failure(HandlerErrors.Validation("Bu durum için özel iptal/teslim edilemedi endpoint'ini kullanın."));
+        if (request.Status == OrderStatus.Assigned)
+            return Result<OrderResponse>.Failure(HandlerErrors.Validation("Kurye ataması için kurye atama endpoint'ini kullanın."));
+        // A retried request (double tap, lost response on a weak mobile connection) must not surface as a failure.
+        if (order.Status == request.Status) return Result<OrderResponse>.Success(OrderMapper.Map(order));
         try { order.ChangeStatus(request.Status, requestContext.UserId); }
         catch (InvalidOperationException exception) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict(exception.Message)); }
         context.OrderStatusHistory.Add(order.StatusHistory.Single());
 
-        if (request.Status == OrderStatus.WaitingForCourier)
+        if (request.Status == OrderStatus.WaitingForCourier && order.DeliveryFulfillment == DeliveryFulfillmentType.MerchantCourier)
         {
             BusinessDispatchSettings? settings = await context.BusinessDispatchSettings.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.BusinessId == order.BusinessId, cancellationToken);
@@ -526,6 +532,7 @@ public sealed class ReportDeliveryFailureHandler(ICoreDbContext context, IReques
         if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId) ||
             (requestContext.CourierId.HasValue && order.CourierId != requestContext.CourierId))
             return Result<OrderResponse>.Failure(HandlerErrors.Forbidden);
+        if (order.Status == OrderStatus.DeliveryFailed) return Result<OrderResponse>.Success(OrderMapper.Map(order));
         try { order.ReportDeliveryFailure(request.Reason, requestContext.UserId); }
         catch (InvalidOperationException exception) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict(exception.Message)); }
         context.OrderStatusHistory.Add(order.StatusHistory.Single());

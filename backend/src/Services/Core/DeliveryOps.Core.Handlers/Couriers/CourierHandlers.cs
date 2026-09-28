@@ -104,6 +104,12 @@ public sealed class AssignCourierToBusinessHandler(ICoreDbContext context, IRequ
             return Result<CourierResponse>.Failure(HandlerErrors.NotFound("İşletme"));
         if (request.BranchId.HasValue && !await context.Branches.AnyAsync(x => x.Id == request.BranchId && x.BusinessId == request.BusinessId, cancellationToken))
             return Result<CourierResponse>.Failure(HandlerErrors.NotFound("Şube"));
+        if (courier.BusinessId != request.BusinessId || courier.BranchId != request.BranchId)
+        {
+            if (await CourierWorkload.HasActiveOrdersAsync(context, courier.Id, cancellationToken) ||
+                await context.CourierShifts.AnyAsync(x => x.CourierId == courier.Id && x.EndedAtUtc == null, cancellationToken))
+                return Result<CourierResponse>.Failure(HandlerErrors.Conflict("Aktif mesaisi veya paketi olan kurye başka işletme/şubeye taşınamaz."));
+        }
         courier.AssignTo(request.BusinessId, request.BranchId);
         await context.SaveChangesAsync(cancellationToken);
         return Result<CourierResponse>.Success(CourierMapper.Map(courier));
@@ -133,8 +139,14 @@ public sealed class DeactivateCourierHandler(ICoreDbContext context, IRequestCon
         Courier? courier = await context.Couriers.FindAsync([request.Id], cancellationToken);
         if (courier is null) return Result.Failure(HandlerErrors.NotFound("Kurye"));
         if (!TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId)) return Result.Failure(HandlerErrors.Forbidden);
+        if (await CourierWorkload.HasActiveOrdersAsync(context, courier.Id, cancellationToken))
+            return Result.Failure(HandlerErrors.Conflict("Aktif paketi olan kurye pasifleştirilemez. Önce paketleri aktarın veya tamamlayın."));
+        CourierShift? openShift = await context.CourierShifts
+            .SingleOrDefaultAsync(x => x.CourierId == courier.Id && x.EndedAtUtc == null, cancellationToken);
+        openShift?.End(DateTimeOffset.UtcNow);
         courier.Deactivate();
-        await context.SaveChangesAsync(cancellationToken);
+        try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return Result.Failure(HandlerErrors.Conflict("Kurye kaydı başka bir işlem tarafından güncellendi. Tekrar deneyin.")); }
         return Result.Success();
     }
 }

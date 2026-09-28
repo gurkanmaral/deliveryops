@@ -17,7 +17,7 @@ public sealed class RecordCourierLocationHandler(ICoreDbContext context, IReques
         Courier? courier = await context.Couriers.FindAsync([request.CourierId], cancellationToken);
         if (courier is null || !courier.IsActive) return Result<CourierLocationSnapshot>.Failure(HandlerErrors.NotFound("Kurye"));
         bool isSelf = requestContext.CourierId == courier.Id;
-        if (!isSelf && !TenantAccess.CanAccessBranch(requestContext, courier.BusinessId, courier.BranchId))
+        if (!TenantAccess.CanManageCourier(requestContext, courier.Id, courier.BusinessId, courier.BranchId))
             return Result<CourierLocationSnapshot>.Failure(HandlerErrors.Forbidden);
 
         DateTimeOffset recordedAt = request.RecordedAtUtc ?? DateTimeOffset.UtcNow;
@@ -31,12 +31,17 @@ public sealed class RecordCourierLocationHandler(ICoreDbContext context, IReques
         CourierLocation location = CourierLocation.Create(courier.Id, courier.BusinessId, request.Latitude,
             request.Longitude, request.AccuracyMeters, request.SpeedMetersPerSecond, request.HeadingDegrees, recordedAt);
         context.CourierLocations.Add(location);
+        bool isLatest = !courier.LastLocationAtUtc.HasValue || recordedAt >= courier.LastLocationAtUtc.Value;
         courier.RecordLocation(recordedAt);
         await context.SaveChangesAsync(cancellationToken);
 
         CourierLocationSnapshot snapshot = Map(courier, location, false);
-        await presenceStore.SetAsync(snapshot, cancellationToken);
-        await notifier.LocationUpdatedAsync(snapshot, cancellationToken);
+        // Samples replayed from the offline queue are kept as history but must not move the live marker backwards.
+        if (isLatest)
+        {
+            await presenceStore.SetAsync(snapshot, cancellationToken);
+            await notifier.LocationUpdatedAsync(snapshot, cancellationToken);
+        }
         return Result<CourierLocationSnapshot>.Success(snapshot);
     }
 
@@ -62,14 +67,20 @@ public sealed class GetLatestCourierLocationsHandler(ICoreDbContext context, IRe
             courierQuery = courierQuery.Where(x => x.BranchId == requestContext.BranchId.Value);
         List<Courier> couriers = await courierQuery.ToListAsync(cancellationToken);
         IReadOnlyDictionary<Guid, CourierLocationSnapshot> cached = await presenceStore.GetAsync(couriers.Select(x => x.Id), cancellationToken);
-        Guid[] missingIds = couriers.Where(x => !cached.ContainsKey(x.Id)).Select(x => x.Id).ToArray();
+        // Courier.LastLocationAtUtc points at the newest sample, so only those rows are read instead of the
+        // whole retained history (which matters when the presence cache is cold, e.g. after a Redis restart).
+        Courier[] missing = couriers.Where(x => !cached.ContainsKey(x.Id) && x.LastLocationAtUtc.HasValue).ToArray();
         List<CourierLocation> latestFromDatabase = [];
-        if (missingIds.Length > 0)
+        if (missing.Length > 0)
         {
+            Guid[] missingIds = missing.Select(x => x.Id).ToArray();
+            DateTimeOffset[] missingTimes = missing.Select(x => x.LastLocationAtUtc!.Value).Distinct().ToArray();
             List<CourierLocation> locations = await context.CourierLocations.AsNoTracking()
-                .Where(x => missingIds.Contains(x.CourierId)).OrderByDescending(x => x.RecordedAtUtc)
+                .Where(x => missingIds.Contains(x.CourierId) && missingTimes.Contains(x.RecordedAtUtc))
                 .ToListAsync(cancellationToken);
-            latestFromDatabase = locations.GroupBy(x => x.CourierId).Select(x => x.First()).ToList();
+            Dictionary<Guid, DateTimeOffset> lastTimes = missing.ToDictionary(x => x.Id, x => x.LastLocationAtUtc!.Value);
+            latestFromDatabase = locations.Where(x => x.RecordedAtUtc == lastTimes[x.CourierId])
+                .GroupBy(x => x.CourierId).Select(x => x.First()).ToList();
         }
 
         DateTimeOffset staleBefore = DateTimeOffset.UtcNow.AddMinutes(-2);
