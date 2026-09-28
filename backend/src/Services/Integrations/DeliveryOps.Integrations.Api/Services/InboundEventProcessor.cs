@@ -54,7 +54,9 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
             }
             inboundEvent.Complete(result.Id, timeProvider.GetUtcNow());
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        // Any failure (not just the expected HTTP/JSON ones) must be recorded, otherwise the event stays in
+        // Processing, is re-picked every two minutes and never reaches the dead-letter limit.
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             inboundEvent.Fail(exception.Message, timeProvider.GetUtcNow(), MaxAttempts);
             logger.LogWarning(exception, "Inbound event {EventId} attempt {Attempt} failed.", eventId, inboundEvent.Attempts);

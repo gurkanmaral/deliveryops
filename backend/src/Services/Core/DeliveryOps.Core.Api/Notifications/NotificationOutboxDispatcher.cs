@@ -36,7 +36,12 @@ public sealed class NotificationOutboxDispatcher(IServiceScopeFactory scopeFacto
                 .OrderBy(x => x.CreatedAtUtc).Select(x => x.Id).Take(20).ToArrayAsync(cancellationToken);
         }
 
-        foreach (Guid id in candidates) await DispatchOne(id, cancellationToken);
+        foreach (Guid id in candidates)
+        {
+            try { await DispatchOne(id, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { logger.LogError(exception, "Notification event {EventId} could not be dispatched.", id); }
+        }
     }
 
     private async Task DispatchOne(Guid id, CancellationToken cancellationToken)

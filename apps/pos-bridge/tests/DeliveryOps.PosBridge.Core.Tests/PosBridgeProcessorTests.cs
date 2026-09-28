@@ -57,6 +57,28 @@ public sealed class PosBridgeProcessorTests : IDisposable
         Assert.True(File.Exists(path));
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.NotFound)]
+    public async Task Connection_configuration_errors_keep_file_in_queue(HttpStatusCode statusCode)
+    {
+        Directory.CreateDirectory(_directory);
+        string path = Path.Combine(_directory, "order.json");
+        await File.WriteAllTextAsync(path,
+            """{"externalOrderId":"POS-3","customerName":"Ada","customerPhone":"555","deliveryAddress":"Istanbul","totalAmount":100}""");
+        HttpClient client = new(new StubHttpHandler(new HttpResponseMessage(statusCode)
+        {
+            Content = new StringContent("", Encoding.UTF8, "text/plain")
+        }));
+        PosBridgeProcessor processor = new(new FolderOrderQueue(), new WebhookOrderSender(client));
+
+        ProcessingCycleResult result = await processor.ProcessOnceAsync(Settings(), CancellationToken.None);
+
+        Assert.Equal(1, result.Retrying);
+        Assert.Equal(0, result.Rejected);
+        Assert.True(File.Exists(path));
+    }
+
     [Fact]
     public async Task Expired_processed_and_failed_archives_are_deleted()
     {

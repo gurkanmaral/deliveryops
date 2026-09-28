@@ -95,8 +95,16 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
             }
         }
 
+        // Only positions from the courier's current shift count: an earlier shift's last position says nothing
+        // about where the courier is now, and the bound keeps this 3-second query off the full history.
+        Dictionary<Guid, DateTimeOffset> shiftStarts = await context.CourierShifts.AsNoTracking()
+            .Where(x => courierIds.Contains(x.CourierId) && x.EndedAtUtc == null)
+            .GroupBy(x => x.CourierId)
+            .Select(group => new { CourierId = group.Key, StartedAtUtc = group.Min(x => x.StartedAtUtc) })
+            .ToDictionaryAsync(x => x.CourierId, x => x.StartedAtUtc, cancellationToken);
+        DateTimeOffset earliestShiftStart = shiftStarts.Count == 0 ? timeProvider.GetUtcNow() : shiftStarts.Values.Min();
         var latestTimes = context.CourierLocations.AsNoTracking()
-            .Where(x => courierIds.Contains(x.CourierId))
+            .Where(x => courierIds.Contains(x.CourierId) && x.RecordedAtUtc >= earliestShiftStart)
             .GroupBy(x => x.CourierId)
             .Select(group => new { CourierId = group.Key, RecordedAtUtc = group.Max(x => x.RecordedAtUtc) });
         List<CourierLocation> latestRows = await (from location in context.CourierLocations.AsNoTracking()
@@ -104,7 +112,9 @@ public sealed class DispatchCandidateFinder(ICoreDbContext context, TimeProvider
                                                       on new { location.CourierId, location.RecordedAtUtc }
                                                       equals new { latest.CourierId, latest.RecordedAtUtc }
                                                   select location).ToListAsync(cancellationToken);
-        Dictionary<Guid, CourierLocation> latestLocations = latestRows.GroupBy(x => x.CourierId)
+        Dictionary<Guid, CourierLocation> latestLocations = latestRows
+            .Where(x => shiftStarts.TryGetValue(x.CourierId, out DateTimeOffset startedAt) && x.RecordedAtUtc >= startedAt)
+            .GroupBy(x => x.CourierId)
             .ToDictionary(group => group.Key, group => group.First());
 
         Dictionary<Guid, Courier> courierLookup = couriers.ToDictionary(x => x.Id);

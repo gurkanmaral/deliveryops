@@ -500,10 +500,19 @@ public sealed class CancelOrderHandler(ICoreDbContext context, IRequestContext r
         try { order.Cancel(request.Reason, requestContext.UserId); }
         catch (InvalidOperationException exception) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict(exception.Message)); }
         context.OrderStatusHistory.Add(order.StatusHistory.Single());
-        int balanceAfter = creditAccount.Refund(1);
-        context.CreditTransactions.Add(CreditTransaction.Create(order.BusinessId, CreditTransactionType.Refund,
-            1, balanceAfter, order.Id, $"İptal edilen sipariş #{order.Id.ToString("N")[..8]} için 1 kredi iade edildi.",
-            requestContext.UserId, $"order-cancel-{order.Id:N}"));
+        // Refund exactly what the order consumed; an order with no consumption record must not mint a credit.
+        int consumed = await context.CreditTransactions.AsNoTracking()
+            .Where(x => x.BusinessId == order.BusinessId && x.OrderId == order.Id &&
+                        x.Type == CreditTransactionType.OrderConsumption)
+            .Select(x => -x.Amount).SingleOrDefaultAsync(cancellationToken);
+        if (consumed > 0)
+        {
+            int balanceAfter = creditAccount.Refund(consumed);
+            context.CreditTransactions.Add(CreditTransaction.Create(order.BusinessId, CreditTransactionType.Refund,
+                consumed, balanceAfter, order.Id,
+                $"İptal edilen sipariş #{order.Id.ToString("N")[..8]} için {consumed} kredi iade edildi.",
+                requestContext.UserId, $"order-cancel-{order.Id:N}"));
+        }
         await ReleaseCourierAsync(context, order, cancellationToken);
         try { await context.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateConcurrencyException) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict("Sipariş başka bir işlem tarafından güncellendi.")); }

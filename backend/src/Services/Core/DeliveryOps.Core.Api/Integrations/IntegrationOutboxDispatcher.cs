@@ -35,7 +35,12 @@ public sealed class IntegrationOutboxDispatcher(IServiceScopeFactory scopeFactor
                     (x.ProcessingAtUtc == null || x.ProcessingAtUtc < now.AddMinutes(-2)))
                 .OrderBy(x => x.CreatedAtUtc).Select(x => x.Id).Take(20).ToArrayAsync(cancellationToken);
         }
-        foreach (Guid id in ids) await DispatchOneAsync(id, cancellationToken);
+        foreach (Guid id in ids)
+        {
+            try { await DispatchOneAsync(id, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { logger.LogError(exception, "Integration event {EventId} could not be dispatched.", id); }
+        }
     }
 
     private async Task DispatchOneAsync(Guid id, CancellationToken cancellationToken)

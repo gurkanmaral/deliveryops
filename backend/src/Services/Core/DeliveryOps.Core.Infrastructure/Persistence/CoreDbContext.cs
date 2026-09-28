@@ -96,6 +96,7 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options, IRequ
         List<AuditLog> logs = [];
         foreach (EntityEntry entry in ChangeTracker.Entries().Where(x => x.Entity is not (AuditLog or NotificationOutboxMessage or IntegrationOutboxMessage or ProviderOrderEventReceipt or DispatchAttempt or OperationalAlert or CourierLocation) && x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
         {
+            if (IsTelemetryOnlyChange(entry)) continue;
             Dictionary<string, object?> changes = entry.Properties
                 .Where(property => entry.State != EntityState.Modified || property.IsModified)
                 .ToDictionary(
@@ -111,6 +112,16 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options, IRequ
         }
         AuditLogs.AddRange(logs);
     }
+
+    private static readonly HashSet<string> CourierTelemetryProperties =
+        [nameof(Courier.LastLocationAtUtc), nameof(Courier.UpdatedAtUtc)];
+
+    // Location pings arrive every few seconds per courier; auditing each LastLocationAtUtc bump would flood
+    // audit_logs without recording any operator decision. Location history already lives in courier_locations.
+    private static bool IsTelemetryOnlyChange(EntityEntry entry) =>
+        entry is { Entity: Courier, State: EntityState.Modified } &&
+        entry.Properties.Where(property => property.IsModified)
+            .All(property => CourierTelemetryProperties.Contains(property.Metadata.Name));
 
     private Guid? TryRequestBusinessId()
     {

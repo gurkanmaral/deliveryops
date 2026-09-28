@@ -26,6 +26,9 @@ public sealed class SignalROperationsNotifier(IHubContext<OperationsHub> hub) : 
         await hub.Clients.Group("platform").SendAsync("orderChanged", order, cancellationToken);
         if (order.CourierId.HasValue)
             await hub.Clients.Group($"courier:{order.CourierId}").SendAsync("orderChanged", order, cancellationToken);
+        // Lets courier apps refresh their available-package list without exposing the order's customer data.
+        await hub.Clients.Group(OperationsHub.CourierPoolGroup(order.BusinessId)).SendAsync("orderChanged",
+            new { id = order.Id, branchId = order.BranchId, status = order.Status }, cancellationToken);
     }
 
     public async Task OrderReassignedAsync(OrderResponse order, Guid previousCourierId, CancellationToken cancellationToken)

@@ -35,9 +35,15 @@ public sealed class OutboundEventWorker(IServiceScopeFactory scopeFactory, TimeP
         }
         foreach (Guid id in ids)
         {
-            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-            await scope.ServiceProvider.GetRequiredService<OutboundEventProcessor>()
-                .ProcessAsync(id, cancellationToken);
+            // One failing event must not stop the rest of the batch.
+            try
+            {
+                await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<OutboundEventProcessor>()
+                    .ProcessAsync(id, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { logger.LogError(exception, "Outbound event {EventId} could not be processed.", id); }
         }
     }
 }
