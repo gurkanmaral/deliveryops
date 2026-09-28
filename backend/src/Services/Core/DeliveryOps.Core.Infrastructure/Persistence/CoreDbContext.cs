@@ -82,6 +82,7 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options, IRequ
         List<EntityEntry<Order>> ordersToNotify = ChangeTracker.Entries<Order>().Where(x =>
                      x.State is EntityState.Added or EntityState.Modified &&
                      (x.State == EntityState.Added || x.Property(nameof(Order.Status)).IsModified) &&
+                     x.Entity.DeliveryFulfillment == DeliveryFulfillmentType.MerchantCourier &&
                      x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.Assigned).ToList();
         foreach (EntityEntry<Order> entry in ordersToNotify)
         {

@@ -190,7 +190,10 @@ public sealed class Order : Entity
     public void AssignCourier(Guid courierId, Guid changedByUserId)
     {
         if (courierId == Guid.Empty) throw new ArgumentException("Courier is required.", nameof(courierId));
+        if (DeliveryFulfillment != DeliveryFulfillmentType.MerchantCourier)
+            throw new InvalidOperationException("Only merchant courier orders can be assigned to a courier.");
         if (CourierId.HasValue) throw new InvalidOperationException("Order has already been assigned to a courier.");
+        EnsureTransitionAllowed(OrderStatus.Assigned);
         CourierId = courierId;
         ChangeStatus(OrderStatus.Assigned, changedByUserId);
     }
@@ -223,12 +226,19 @@ public sealed class Order : Entity
 
     public void ChangeStatus(OrderStatus next, Guid changedByUserId)
     {
-        if (!AllowedTransitions.TryGetValue(Status, out OrderStatus[]? allowed) || !allowed.Contains(next))
-            throw new InvalidOperationException($"Order cannot transition from {Status} to {next}.");
+        EnsureTransitionAllowed(next);
+        if (next == OrderStatus.Assigned && !CourierId.HasValue)
+            throw new InvalidOperationException("An order can only become Assigned through courier assignment.");
         OrderStatus previous = Status;
         Status = next;
         StatusHistory.Add(OrderStatusHistory.Create(Id, previous, next, changedByUserId));
         MarkAsUpdated();
+    }
+
+    private void EnsureTransitionAllowed(OrderStatus next)
+    {
+        if (!AllowedTransitions.TryGetValue(Status, out OrderStatus[]? allowed) || !allowed.Contains(next))
+            throw new InvalidOperationException($"Order cannot transition from {Status} to {next}.");
     }
 
     public void ApplyProviderDeliveryStatus(OrderStatus next, Guid changedByUserId)

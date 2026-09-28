@@ -57,6 +57,11 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
+function isSessionRejected(error: unknown) {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500 &&
+    error.status !== 408 && error.status !== 429;
+}
+
 async function authenticatedApi<T>(baseUrl: string, path: string, init: RequestInit = {}) {
   const token = await getAccessToken();
   try {
@@ -67,8 +72,12 @@ async function authenticatedApi<T>(baseUrl: string, path: string, init: RequestI
       const refreshedToken = await refreshAccessToken();
       return await request<T>(baseUrl, path, init, refreshedToken);
     } catch (refreshError) {
-      await clearSessionStorage();
-      authenticationLostListener?.();
+      // Only a definitive rejection of the refresh token ends the session. A network drop or server error
+      // on the road must not sign the courier out mid-delivery; the next request retries the refresh.
+      if (isSessionRejected(refreshError)) {
+        await clearSessionStorage();
+        authenticationLostListener?.();
+      }
       throw refreshError;
     }
   }

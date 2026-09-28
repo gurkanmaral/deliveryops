@@ -22,6 +22,7 @@ public sealed class GetDispatchQueueHandler(ICoreDbContext context, IRequestCont
             join state in context.OrderDispatchStates.AsNoTracking() on order.Id equals state.OrderId into states
             from state in states.DefaultIfEmpty()
             where order.BusinessId == businessId && order.Status == OrderStatus.WaitingForCourier && order.CourierId == null
+                && order.DeliveryFulfillment == DeliveryFulfillmentType.MerchantCourier
                 && (!requestContext.BranchId.HasValue || order.BranchId == requestContext.BranchId.Value)
             orderby order.CreatedAtUtc
             select new DispatchQueueItemResponse(order.Id, order.BusinessId, order.BranchId, order.CustomerName,
@@ -86,7 +87,8 @@ public sealed class RetryDispatchHandler(ICoreDbContext context, IRequestContext
         Order? order = await context.Orders.SingleOrDefaultAsync(x => x.Id == request.OrderId, cancellationToken);
         if (order is null) return Result.Failure(HandlerErrors.NotFound("Sipariş"));
         if (!TenantAccess.CanAccessBranch(requestContext, order.BusinessId, order.BranchId)) return Result.Failure(HandlerErrors.Forbidden);
-        if (order.Status != OrderStatus.WaitingForCourier || order.CourierId.HasValue)
+        if (order.Status != OrderStatus.WaitingForCourier || order.CourierId.HasValue ||
+            order.DeliveryFulfillment != DeliveryFulfillmentType.MerchantCourier)
             return Result.Failure(HandlerErrors.Conflict("Yalnızca kurye bekleyen sipariş yeniden denenebilir."));
         if (!await context.BusinessDispatchSettings.AnyAsync(x => x.BusinessId == order.BusinessId && x.AutoAssignCouriers, cancellationToken))
             return Result.Failure(HandlerErrors.Conflict("Önce işletme için otomatik kurye atamayı açın."));

@@ -188,6 +188,46 @@ public sealed class OrderTests
         Assert.Null(order.CourierId);
     }
 
+    [Fact]
+    public void ChangeStatus_RejectsAssignedWithoutCourier()
+    {
+        Order order = CreateOrder();
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+
+        Assert.Throws<InvalidOperationException>(() => order.ChangeStatus(OrderStatus.Assigned, userId));
+
+        Assert.Equal(OrderStatus.Confirmed, order.Status);
+        Assert.Null(order.CourierId);
+    }
+
+    [Fact]
+    public void AssignCourier_RejectsProviderCourierOrder()
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), "YS-1", "Ada", "05550000000",
+            "Kadıköy", OrderSource.Yemeksepeti, 100m, Guid.NewGuid().ToString("N"),
+            new string('A', 64), Guid.NewGuid(), deliveryFulfillment: DeliveryFulfillmentType.ProviderCourier);
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+        order.ChangeStatus(OrderStatus.WaitingForCourier, userId);
+
+        Assert.Throws<InvalidOperationException>(() => order.AssignCourier(Guid.NewGuid(), userId));
+
+        Assert.Null(order.CourierId);
+        Assert.Equal(OrderStatus.WaitingForCourier, order.Status);
+    }
+
+    [Fact]
+    public void AssignCourier_LeavesOrderUntouchedWhenTransitionIsInvalid()
+    {
+        Order order = CreateOrder();
+
+        Assert.Throws<InvalidOperationException>(() => order.AssignCourier(Guid.NewGuid(), Guid.NewGuid()));
+
+        Assert.Null(order.CourierId);
+        Assert.Equal(OrderStatus.New, order.Status);
+    }
+
     private static Order CreateOrder() => Order.Create(
         Guid.NewGuid(), Guid.NewGuid(), string.Empty, "Ada Lovelace", "+905555555555",
         "Kadıköy, İstanbul", OrderSource.Phone, 250m, Guid.NewGuid().ToString("N"),

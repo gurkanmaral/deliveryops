@@ -15,6 +15,13 @@ internal static class TenantAccess
         CanAccess(context, businessId) &&
         (!context.BranchId.HasValue || context.BranchId == branchId);
 
+    // Courier accounts carry a business_id claim, so the branch check alone would let one courier act on
+    // another courier's shift or location. A courier may only act on their own record.
+    public static bool CanManageCourier(IRequestContext context, Guid courierId, Guid businessId, Guid? branchId) =>
+        context.CourierId.HasValue
+            ? context.CourierId.Value == courierId
+            : CanAccessBranch(context, businessId, branchId);
+
     public static Guid? ResolveBusinessId(IRequestContext context, Guid? requestedBusinessId) =>
         context.IsPlatformAdmin ? requestedBusinessId : context.BusinessId;
 }

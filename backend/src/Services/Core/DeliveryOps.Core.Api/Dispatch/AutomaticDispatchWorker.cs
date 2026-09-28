@@ -32,7 +32,8 @@ public sealed class AutomaticDispatchWorker(
         CoreDbContext context = discoveryScope.ServiceProvider.GetRequiredService<CoreDbContext>();
         DateTimeOffset now = timeProvider.GetUtcNow();
         Guid[] orderIds = await context.Orders.AsNoTracking()
-            .Where(order => order.Status == OrderStatus.WaitingForCourier && order.CourierId == null)
+            .Where(order => order.Status == OrderStatus.WaitingForCourier && order.CourierId == null &&
+                            order.DeliveryFulfillment == DeliveryFulfillmentType.MerchantCourier)
             .Where(order => context.BusinessDispatchSettings.Any(settings =>
                 settings.BusinessId == order.BusinessId && settings.AutoAssignCouriers))
             .Where(order => !context.OrderDispatchStates.Any(state => state.OrderId == order.Id) ||
@@ -44,7 +45,43 @@ public sealed class AutomaticDispatchWorker(
             .ToArrayAsync(cancellationToken);
 
         foreach (Guid orderId in orderIds)
-            await TryDispatchAsync(orderId, cancellationToken);
+        {
+            // Isolate failures: the batch is ordered oldest-first, so one order that keeps throwing would
+            // otherwise abort every cycle and stop dispatch for all businesses.
+            try { await TryDispatchAsync(orderId, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Automatic dispatch failed for order {OrderId}; backing off.", orderId);
+                await BackOffFailedOrderAsync(orderId, cancellationToken);
+            }
+        }
+    }
+
+    private async Task BackOffFailedOrderAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            CoreDbContext context = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Order? order = await context.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == orderId, cancellationToken);
+            if (order is null) return;
+            OrderDispatchState? state = await context.OrderDispatchStates.SingleOrDefaultAsync(x => x.OrderId == orderId, cancellationToken);
+            if (state is null)
+            {
+                state = OrderDispatchState.Create(order.Id, order.BusinessId);
+                context.OrderDispatchStates.Add(state);
+            }
+            const string reason = "Otomatik atama sırasında beklenmeyen bir hata oluştu; tekrar denenecek.";
+            state.MarkNoCourier(timeProvider.GetUtcNow(), reason);
+            context.DispatchAttempts.Add(DispatchAttempt.Create(order.Id, order.BusinessId, null, "Automatic", false, reason));
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Could not record dispatch back-off for order {OrderId}.", orderId);
+        }
     }
 
     private async Task TryDispatchAsync(Guid orderId, CancellationToken cancellationToken)
