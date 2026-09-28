@@ -36,7 +36,13 @@ public sealed class OperationalAlertWorker(IServiceScopeFactory scopeFactory, Ti
             businessIds = await context.Businesses.AsNoTracking().Where(x => x.IsActive)
                 .Select(x => x.Id).ToArrayAsync(cancellationToken);
         }
-        foreach (Guid businessId in businessIds) await ProcessBusinessAsync(businessId, cancellationToken);
+        foreach (Guid businessId in businessIds)
+        {
+            // A failure for one business must not stop SLA alerts for every other business.
+            try { await ProcessBusinessAsync(businessId, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) { logger.LogError(exception, "SLA evaluation failed for business {BusinessId}.", businessId); }
+        }
     }
 
     private async Task ProcessBusinessAsync(Guid businessId, CancellationToken cancellationToken)
@@ -57,8 +63,13 @@ public sealed class OperationalAlertWorker(IServiceScopeFactory scopeFactory, Ti
         AlertCandidate? creditAlert = await DetectLowCreditAlertAsync(context, businessId, cancellationToken);
         if (creditAlert is not null) detected.Add(creditAlert);
 
+        // Open alerts, plus resolved ones only when the same problem is detected again (they are reopened by
+        // key); the rest of the resolved history does not need to be loaded every cycle.
+        string[] detectedKeyList = detected.Select(x => x.Key).Distinct().ToArray();
         List<OperationalAlert> existing = await context.OperationalAlerts
-            .Where(x => x.BusinessId == businessId && ManagedTypes.Contains(x.Type)).ToListAsync(cancellationToken);
+            .Where(x => x.BusinessId == businessId && ManagedTypes.Contains(x.Type) &&
+                        (x.Status != OperationalAlertStatus.Resolved || detectedKeyList.Contains(x.AlertKey)))
+            .ToListAsync(cancellationToken);
         Dictionary<string, OperationalAlert> byKey = existing.ToDictionary(x => x.AlertKey);
         List<OperationalAlert> changed = [];
 
@@ -159,7 +170,9 @@ public sealed class OperationalAlertWorker(IServiceScopeFactory scopeFactory, Ti
                 settings.LocationStaleCriticalMinutes);
             if (!severity.HasValue) continue;
             int minutes = Math.Max(1, (int)Math.Floor(elapsed.TotalMinutes));
-            result.Add(new AlertCandidate($"courier:{item.Courier.Id}:{OperationalAlertType.CourierLocationStale}",
+            // Keys are globally unique and couriers can move between businesses, so the key carries the business.
+            result.Add(new AlertCandidate(
+                $"courier:{settings.BusinessId}:{item.Courier.Id}:{OperationalAlertType.CourierLocationStale}",
                 OperationalAlertType.CourierLocationStale, severity.Value, null, item.Courier.Id,
                 "Kurye konumu güncel değil",
                 $"{item.Courier.FirstName} {item.Courier.LastName} için {minutes} dakikadır konum alınamadı."));

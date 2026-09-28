@@ -73,7 +73,15 @@ public sealed class TokenService(
         return new TokenResponse(new JwtSecurityTokenHandler().WriteToken(jwt), rawRefreshToken, expiresAt);
     }
 
-    public async Task<TokenResponse?> RefreshAsync(string rawToken, CancellationToken cancellationToken)
+    // A rotated token presented again within this window is treated as a retry (lost response on a weak
+    // mobile connection, or two app processes refreshing at once), not as theft.
+    private static readonly TimeSpan ReuseGracePeriod = TimeSpan.FromSeconds(60);
+
+    public Task<TokenResponse?> RefreshAsync(string rawToken, CancellationToken cancellationToken) =>
+        RefreshAsync(rawToken, allowConflictRetry: true, cancellationToken);
+
+    private async Task<TokenResponse?> RefreshAsync(string rawToken, bool allowConflictRetry,
+        CancellationToken cancellationToken)
     {
         DateTimeOffset now = timeProvider.GetUtcNow();
         string tokenHash = Hash(rawToken);
@@ -83,6 +91,13 @@ public sealed class TokenService(
         if (token is null || !token.User.IsActive || token.ExpiresAtUtc <= now) return null;
         if (token.RevokedAtUtc is not null)
         {
+            if (await IsGracefulReuseAsync(token, now, cancellationToken))
+            {
+                // Issue another token in the same family; the earlier replacement stays valid until it rotates.
+                TokenResponse retryResponse = await CreateTokenResponseAsync(token.User, token.FamilyId, now, cancellationToken);
+                await context.SaveChangesAsync(cancellationToken);
+                return retryResponse;
+            }
             await RevokeFamilyAsync(token.FamilyId, now, cancellationToken);
             return null;
         }
@@ -101,9 +116,23 @@ public sealed class TokenService(
         {
             await transaction.RollbackAsync(cancellationToken);
             context.ChangeTracker.Clear();
+            // A concurrent refresh with the same token just rotated it; retry once through the grace path.
+            if (allowConflictRetry) return await RefreshAsync(rawToken, allowConflictRetry: false, cancellationToken);
             await RevokeFamilyAsync(token.FamilyId, now, cancellationToken);
             return null;
         }
+    }
+
+    private async Task<bool> IsGracefulReuseAsync(RefreshToken token, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // Only a token that was rotated (not logged out or revoked as part of a family) qualifies, and only
+        // while its family still has a live token, so a family revoked for theft stays revoked.
+        if (token.ReplacedByTokenHash is null || token.RevokedAtUtc is null ||
+            now - token.RevokedAtUtc.Value > ReuseGracePeriod)
+            return false;
+        return await context.RefreshTokens.AnyAsync(x => x.FamilyId == token.FamilyId &&
+            x.RevokedAtUtc == null && x.ExpiresAtUtc > now, cancellationToken);
     }
 
     public async Task RevokeAsync(string rawToken, CancellationToken cancellationToken)

@@ -29,14 +29,28 @@ public sealed class CoreRetentionWorker(IServiceScopeFactory scopeFactory, TimeP
         int reencrypted = await ReencryptLegacyPiiAsync(context, cancellationToken);
         DateTimeOffset piiCutoff = now.AddDays(-Math.Clamp(options.Value.OrderPiiDays, 1, 3650));
         OrderStatus[] terminalStatuses = [OrderStatus.Delivered, OrderStatus.Cancelled, OrderStatus.Returned];
-        var ordersToAnonymize = await context.Orders
-            .Where(x => x.PiiAnonymizedAtUtc == null && terminalStatuses.Contains(x.Status) &&
-                        (x.UpdatedAtUtc ?? x.CreatedAtUtc) < piiCutoff)
-            .OrderBy(x => x.CreatedAtUtc)
-            .Take(Math.Clamp(options.Value.OrderPiiBatchSize, 1, 2000))
-            .ToListAsync(cancellationToken);
-        foreach (var order in ordersToAnonymize) order.AnonymizePii(now);
-        if (ordersToAnonymize.Count > 0) await context.SaveChangesAsync(cancellationToken);
+        int batchSize = Math.Clamp(options.Value.OrderPiiBatchSize, 1, 2000);
+        int anonymized = 0;
+        // Keep going until the backlog is clear (bounded per run), otherwise a platform finishing more orders
+        // per day than one batch would keep customer data past the retention period indefinitely.
+        for (int batch = 0; batch < MaxPiiBatchesPerRun; batch++)
+        {
+            var ordersToAnonymize = await context.Orders
+                .Where(x => x.PiiAnonymizedAtUtc == null && terminalStatuses.Contains(x.Status) &&
+                            (x.UpdatedAtUtc ?? x.CreatedAtUtc) < piiCutoff)
+                .OrderBy(x => x.CreatedAtUtc)
+                .Take(batchSize)
+                .ToListAsync(cancellationToken);
+            foreach (var order in ordersToAnonymize) order.AnonymizePii(now);
+            if (ordersToAnonymize.Count > 0) await context.SaveChangesAsync(cancellationToken);
+            context.ChangeTracker.Clear();
+            anonymized += ordersToAnonymize.Count;
+            if (ordersToAnonymize.Count < batchSize) break;
+        }
+        int alerts = await context.OperationalAlerts
+            .Where(x => x.Status == OperationalAlertStatus.Resolved && x.ResolvedAtUtc != null &&
+                        x.ResolvedAtUtc < now.AddDays(-Math.Clamp(options.Value.ResolvedAlertDays, 7, 3650)))
+            .ExecuteDeleteAsync(cancellationToken);
         int locations = await context.CourierLocations
             .Where(x => x.RecordedAtUtc < now.AddDays(-Math.Clamp(options.Value.LocationDays, 1, 365)))
             .ExecuteDeleteAsync(cancellationToken);
@@ -50,10 +64,12 @@ public sealed class CoreRetentionWorker(IServiceScopeFactory scopeFactory, TimeP
         int integrations = await context.IntegrationOutbox
             .Where(x => x.ProcessedAtUtc != null && x.ProcessedAtUtc < outboxCutoff)
             .ExecuteDeleteAsync(cancellationToken);
-        if (reencrypted + ordersToAnonymize.Count + locations + audits + notifications + integrations > 0)
-            logger.LogInformation("Core privacy maintenance re-encrypted {Reencrypted} legacy orders, anonymized {Anonymized} orders and removed {Locations} locations, {Audits} audits, {Notifications} notification outbox and {Integrations} integration outbox rows.",
-                reencrypted, ordersToAnonymize.Count, locations, audits, notifications, integrations);
+        if (reencrypted + anonymized + alerts + locations + audits + notifications + integrations > 0)
+            logger.LogInformation("Core privacy maintenance re-encrypted {Reencrypted} legacy orders, anonymized {Anonymized} orders and removed {Alerts} resolved alerts, {Locations} locations, {Audits} audits, {Notifications} notification outbox and {Integrations} integration outbox rows.",
+                reencrypted, anonymized, alerts, locations, audits, notifications, integrations);
     }
+
+    private const int MaxPiiBatchesPerRun = 50;
 
     private static async Task<int> ReencryptLegacyPiiAsync(CoreDbContext context, CancellationToken cancellationToken)
     {
@@ -86,5 +102,6 @@ public sealed class CoreRetentionOptions
     public int ProcessedOutboxDays { get; init; } = 7;
     public int OrderPiiDays { get; init; } = 90;
     public int OrderPiiBatchSize { get; init; } = 500;
+    public int ResolvedAlertDays { get; init; } = 90;
     public int ScanIntervalHours { get; init; } = 24;
 }

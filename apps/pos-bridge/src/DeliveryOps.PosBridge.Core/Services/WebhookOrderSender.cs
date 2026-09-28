@@ -24,7 +24,11 @@ public sealed class WebhookOrderSender(HttpClient client) : IOrderSender
                 return OrderSendResult.Sent(result?.OrderId, result?.Duplicate ?? false);
             }
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
-            bool retryable = response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500;
+            // 401/403/404 mean the secret or connection is misconfigured or paused, not that the order is bad;
+            // keep the file in the inbox so it is sent once the configuration is fixed instead of being lost.
+            bool retryable = response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests
+                or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound
+                || (int)response.StatusCode >= 500;
             return OrderSendResult.Failed($"Webhook returned {(int)response.StatusCode}: {ExtractProblem(body)}", retryable);
         }
         catch (HttpRequestException exception)

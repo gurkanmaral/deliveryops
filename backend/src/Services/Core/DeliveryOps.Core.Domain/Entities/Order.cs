@@ -248,7 +248,9 @@ public sealed class Order : Entity
         if (next is not (OrderStatus.OnTheWay or OrderStatus.Delivered))
             throw new ArgumentOutOfRangeException(nameof(next));
         if (Status == OrderStatus.New) SetProviderStatus(OrderStatus.Confirmed, changedByUserId);
-        if (Status == OrderStatus.Confirmed) SetProviderStatus(OrderStatus.OnTheWay, changedByUserId);
+        // WaitingForCourier is where the merchant marks a provider-courier order ready for the provider's courier.
+        if (Status is OrderStatus.Confirmed or OrderStatus.WaitingForCourier)
+            SetProviderStatus(OrderStatus.OnTheWay, changedByUserId);
         if (next == OrderStatus.Delivered && Status == OrderStatus.OnTheWay)
             SetProviderStatus(OrderStatus.Delivered, changedByUserId);
         if (Status != next && !(next == OrderStatus.OnTheWay && Status == OrderStatus.Delivered))

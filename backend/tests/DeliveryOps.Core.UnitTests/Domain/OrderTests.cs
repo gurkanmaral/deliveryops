@@ -189,6 +189,37 @@ public sealed class OrderTests
     }
 
     [Fact]
+    public void Provider_courier_order_marked_ready_by_merchant_can_be_dispatched_and_delivered()
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), "YS-2", "Ada", "05550000000",
+            "Kadıköy", OrderSource.Yemeksepeti, 100m, Guid.NewGuid().ToString("N"),
+            new string('A', 64), Guid.NewGuid(), deliveryFulfillment: DeliveryFulfillmentType.ProviderCourier);
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+        order.ChangeStatus(OrderStatus.WaitingForCourier, userId);
+
+        order.ApplyProviderDeliveryStatus(OrderStatus.OnTheWay, userId);
+        order.ApplyProviderDeliveryStatus(OrderStatus.Delivered, userId);
+
+        Assert.Equal(OrderStatus.Delivered, order.Status);
+    }
+
+    [Fact]
+    public void Provider_courier_order_waiting_for_courier_can_be_delivered_directly()
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), "YS-3", "Ada", "05550000000",
+            "Kadıköy", OrderSource.Yemeksepeti, 100m, Guid.NewGuid().ToString("N"),
+            new string('A', 64), Guid.NewGuid(), deliveryFulfillment: DeliveryFulfillmentType.ProviderCourier);
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+        order.ChangeStatus(OrderStatus.WaitingForCourier, userId);
+
+        order.ApplyProviderDeliveryStatus(OrderStatus.Delivered, userId);
+
+        Assert.Equal(OrderStatus.Delivered, order.Status);
+    }
+
+    [Fact]
     public void ChangeStatus_RejectsAssignedWithoutCourier()
     {
         Order order = CreateOrder();

@@ -98,8 +98,8 @@ public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequ
         CreditTransaction? consumption = await context.CreditTransactions.AsNoTracking()
             .SingleOrDefaultAsync(x => x.BusinessId == order.BusinessId && x.OrderId == order.Id &&
                 x.Type == CreditTransactionType.OrderConsumption, cancellationToken);
-        if (consumption is null)
-            return Result<bool>.Failure(HandlerErrors.NotFound("Sipariş kredi hareketi"));
+        // Nothing was consumed, so there is nothing to refund; the provider cancellation itself must still apply.
+        if (consumption is null) return Result<bool>.Success(false);
         BusinessCreditAccount? account = await context.BusinessCreditAccounts
             .SingleOrDefaultAsync(x => x.BusinessId == order.BusinessId, cancellationToken);
         if (account is null)

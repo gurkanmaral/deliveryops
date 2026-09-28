@@ -33,7 +33,16 @@ public sealed class RecordCourierLocationHandler(ICoreDbContext context, IReques
         context.CourierLocations.Add(location);
         bool isLatest = !courier.LastLocationAtUtc.HasValue || recordedAt >= courier.LastLocationAtUtc.Value;
         courier.RecordLocation(recordedAt);
-        await context.SaveChangesAsync(cancellationToken);
+        try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The courier row is also the concurrency guard for assignments. If one committed in between,
+            // reload and retry once so the sample is not dropped (the phone treats 409 as permanent).
+            await context.Couriers.Entry(courier).ReloadAsync(cancellationToken);
+            isLatest = !courier.LastLocationAtUtc.HasValue || recordedAt >= courier.LastLocationAtUtc.Value;
+            courier.RecordLocation(recordedAt);
+            await context.SaveChangesAsync(cancellationToken);
+        }
 
         CourierLocationSnapshot snapshot = Map(courier, location, false);
         // Samples replayed from the offline queue are kept as history but must not move the live marker backwards.
