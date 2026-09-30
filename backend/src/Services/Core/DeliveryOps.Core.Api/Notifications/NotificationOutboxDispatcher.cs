@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json.Nodes;
+using DeliveryOps.Core.Domain.Enums;
 using DeliveryOps.Core.Domain.Entities;
 using DeliveryOps.Core.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -58,7 +60,8 @@ public sealed class NotificationOutboxDispatcher(IServiceScopeFactory scopeFacto
 
         try
         {
-            using StringContent content = new(message.PayloadJson, Encoding.UTF8, "application/json");
+            string payload = await WithEligibleCouriersAsync(database, message, cancellationToken);
+            using StringContent content = new(payload, Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await httpClientFactory.CreateClient("Notifications")
                 .PostAsync("internal/v1/notifications/order-event", content, cancellationToken);
             if (response.IsSuccessStatusCode)
@@ -87,6 +90,29 @@ public sealed class NotificationOutboxDispatcher(IServiceScopeFactory scopeFacto
             LogFailure(message, id, exception);
         }
         await database.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// "Package available" pushes go only to couriers who could actually claim it right now: active, on an
+    /// open shift, available, and in the order's branch (or unassigned to a branch). Resolved at send time
+    /// so a courier who ended the shift after the order was created is not woken up.
+    /// </summary>
+    private static async Task<string> WithEligibleCouriersAsync(CoreDbContext database,
+        NotificationOutboxMessage message, CancellationToken cancellationToken)
+    {
+        if (message.EventType != "OrderAvailable") return message.PayloadJson;
+        if (JsonNode.Parse(message.PayloadJson) is not JsonObject payload) return message.PayloadJson;
+        Guid? branchId = payload["BranchId"] is JsonValue branch && branch.TryGetValue(out Guid parsedBranch)
+            ? parsedBranch : null;
+        Guid[] courierIds = await database.Couriers.AsNoTracking()
+            .Where(x => x.BusinessId == message.BusinessId && x.IsActive &&
+                        x.Availability == CourierAvailability.Available &&
+                        (x.BranchId == null || x.BranchId == branchId) &&
+                        database.CourierShifts.Any(shift => shift.CourierId == x.Id && shift.EndedAtUtc == null))
+            .Select(x => x.Id)
+            .ToArrayAsync(cancellationToken);
+        payload["EligibleCourierIds"] = new JsonArray(courierIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+        return payload.ToJsonString();
     }
 
     private void LogFailure(NotificationOutboxMessage message, Guid id, Exception? exception)

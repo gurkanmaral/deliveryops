@@ -68,7 +68,7 @@ public sealed class GetOrdersHandler(ICoreDbContext context, IRequestContext req
             "-source" => query.OrderByDescending(x => x.Source).ThenByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id),
             _ => query.OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id)
         };
-        PagedResponse<OrderResponse> response = await query.Select(x => new OrderResponse(x.Id, x.BusinessId, x.BranchId, x.CourierId, x.ExternalId, x.CustomerName, x.CustomerPhone, x.DeliveryAddress, x.Source, x.Status, x.TotalAmount, x.Currency, x.CreatedAtUtc, x.CancellationReason, x.DeliveryFailureReason, Array.Empty<OrderStatus>(), null, 0, null, null, x.DeliveryLatitude, x.DeliveryLongitude, x.DeliveryInstructions, x.DeliveryLocationSource, x.DeliveryLocationAccuracy, x.DeliveryFulfillment))
+        PagedResponse<OrderResponse> response = await query.Select(x => new OrderResponse(x.Id, x.BusinessId, x.BranchId, x.CourierId, x.ExternalId, x.CustomerName, x.CustomerPhone, x.DeliveryAddress, x.Source, x.Status, x.TotalAmount, x.Currency, x.CreatedAtUtc, x.CancellationReason, x.DeliveryFailureReason, Array.Empty<OrderStatus>(), null, 0, null, null, x.DeliveryLatitude, x.DeliveryLongitude, x.DeliveryInstructions, x.DeliveryLocationSource, x.DeliveryLocationAccuracy, x.DeliveryFulfillment, x.PaymentMethod, x.PaymentStatus, x.PaidAmount, x.PaidAtUtc, x.PaymentReference, x.PaymentChannel, x.DeliveredDistanceMeters))
             .ToPagedAsync(request.Page, request.PageSize, cancellationToken);
         Guid[] orderIds = response.Items.Select(x => x.Id).ToArray();
         Dictionary<Guid, OrderDispatchState> dispatchStates = await context.OrderDispatchStates.AsNoTracking()
@@ -127,6 +127,8 @@ public sealed class CreateOrderHandler(ICoreDbContext context, IRequestContext r
             requestHash, requestContext.UserId, request.DeliveryLatitude, request.DeliveryLongitude,
             request.DeliveryInstructions, request.DeliveryLocationSource, request.DeliveryLocationAccuracy,
             request.DeliveryFulfillment);
+        Error? paymentError = OrderPayments.ApplyInitial(order, request.Payment, DateTimeOffset.UtcNow);
+        if (paymentError is not null) return Result<OrderResponse>.Failure(paymentError);
         BusinessCreditAccount? creditAccount = await context.BusinessCreditAccounts
             .SingleOrDefaultAsync(x => x.BusinessId == request.BusinessId, cancellationToken);
         if (creditAccount is null)
@@ -450,6 +452,15 @@ public sealed class ChangeOrderStatusHandler(ICoreDbContext context, IRequestCon
             context.OrderDispatchStates.Add(dispatchState);
         }
 
+        if (request.Status == OrderStatus.Delivered)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            // Delivering a cash/card-on-delivery order means the courier took the money at the door.
+            OrderPayments.CollectOnDelivery(order, now);
+            if (requestContext.CourierId.HasValue)
+                await OrderPayments.RecordDeliveryDistanceAsync(context, order, requestContext.CourierId.Value, now, cancellationToken);
+        }
+
         if (order.CourierId.HasValue)
         {
             Courier? courier = await context.Couriers.FindAsync([order.CourierId.Value], cancellationToken);
@@ -560,7 +571,10 @@ public static class OrderMapper
         x.CancellationReason, x.DeliveryFailureReason, x.AllowedNextStatuses, DeliveryLatitude: x.DeliveryLatitude,
         DeliveryLongitude: x.DeliveryLongitude, DeliveryInstructions: x.DeliveryInstructions,
         DeliveryLocationSource: x.DeliveryLocationSource, DeliveryLocationAccuracy: x.DeliveryLocationAccuracy,
-        DeliveryFulfillment: x.DeliveryFulfillment);
+        DeliveryFulfillment: x.DeliveryFulfillment, PaymentMethod: x.PaymentMethod,
+        PaymentStatus: x.PaymentStatus, PaidAmount: x.PaidAmount, PaidAtUtc: x.PaidAtUtc,
+        PaymentReference: x.PaymentReference, PaymentChannel: x.PaymentChannel,
+        DeliveredDistanceMeters: x.DeliveredDistanceMeters);
 }
 
 internal static class OrderCreationFingerprint
@@ -582,6 +596,13 @@ internal static class OrderCreationFingerprint
             ((int)request.DeliveryFulfillment).ToString(CultureInfo.InvariantCulture),
             ((int)request.Source).ToString(CultureInfo.InvariantCulture),
             request.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture));
+        // Only appended when present so fingerprints of existing payment-less requests stay unchanged.
+        if (request.Payment is { } payment)
+            canonical += '\u001f' + string.Join('\u001f',
+                ((int)payment.Method).ToString(CultureInfo.InvariantCulture),
+                payment.IsPaid ? "paid" : "unpaid",
+                payment.Amount?.ToString("0.00", CultureInfo.InvariantCulture) ?? string.Empty,
+                payment.Reference?.Trim() ?? string.Empty);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 }

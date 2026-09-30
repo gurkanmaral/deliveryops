@@ -20,11 +20,24 @@ public sealed class OperationsHub : Hub
         }
         else if (!string.IsNullOrWhiteSpace(businessId))
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"business:{businessId}");
+            string? branchId = Context.User?.FindFirst("branch_id")?.Value;
+            if (string.IsNullOrWhiteSpace(branchId))
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"business:{businessId}");
+            }
+            else
+            {
+                // Branch-scoped staff see only their branch's orders (customer data), matching the REST API,
+                // plus the business-wide courier map and alerts.
+                await Groups.AddToGroupAsync(Context.ConnectionId, BranchOrdersGroup(branchId));
+                await Groups.AddToGroupAsync(Context.ConnectionId, BranchOperationsGroup(businessId));
+            }
         }
         if (Context.User?.IsInRole("PlatformAdmin") == true) await Groups.AddToGroupAsync(Context.ConnectionId, "platform");
         await base.OnConnectedAsync();
     }
 
     public static string CourierPoolGroup(object businessId) => $"business-couriers:{businessId}";
+    public static string BranchOrdersGroup(object branchId) => $"branch:{branchId}";
+    public static string BranchOperationsGroup(object businessId) => $"business-branch-staff:{businessId}";
 }

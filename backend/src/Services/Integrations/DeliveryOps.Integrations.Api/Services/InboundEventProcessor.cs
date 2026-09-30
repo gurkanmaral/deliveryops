@@ -46,7 +46,7 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
             {
                 result = await coreOrdersClient.ApplyProviderEventAsync(inboundEvent.Connection,
                     inboundEvent.ExternalOrderId, inboundEvent.ExternalEventId, providerStatus,
-                    ReadCancellationReason(inboundEvent.RawPayload), cancellationToken);
+                    ReadCancellationReason(inboundEvent.RawPayload), cancellationToken, order.Payment);
             }
             else
             {
@@ -71,6 +71,7 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
         "order.dispatched" or "order.shipped" => "DISPATCHED",
         "order.delivered" => "DELIVERED",
         "order.cancelled" or "order.canceled" or "order.unsupplied" => "CANCELLED",
+        "order.paid" => "PAID",
         _ => null
     };
 

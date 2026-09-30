@@ -29,7 +29,8 @@ public sealed class CoreOrdersClient(HttpClient client)
             connection.BusinessId, connection.BranchId, ExternalId = order.ExternalOrderId,
             order.CustomerName, order.CustomerPhone, order.DeliveryAddress, Source = source, order.TotalAmount,
             order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryInstructions,
-            DeliveryFulfillment = (int)order.DeliveryFulfillment
+            DeliveryFulfillment = (int)order.DeliveryFulfillment,
+            Payment = order.Payment?.ToCorePayload()
         };
         using HttpResponseMessage response = await client.PostAsJsonAsync("api/v1/internal/orders", payload, cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -43,7 +44,7 @@ public sealed class CoreOrdersClient(HttpClient client)
 
     public async Task<CoreOrderResult> ApplyProviderEventAsync(IntegrationConnection connection,
         string externalOrderId, string externalEventId, string providerStatus,
-        string? cancellationReason, CancellationToken cancellationToken)
+        string? cancellationReason, CancellationToken cancellationToken, InboundPayment? payment = null)
     {
         int source = connection.Provider switch
         {
@@ -57,7 +58,8 @@ public sealed class CoreOrdersClient(HttpClient client)
         {
             connection.BusinessId, ExternalOrderId = externalOrderId, Source = source,
             ExternalEventId = externalEventId, ProviderStatus = providerStatus,
-            CancellationReason = cancellationReason
+            CancellationReason = cancellationReason,
+            Payment = payment?.ToCorePayload()
         };
         using HttpResponseMessage response = await client.PostAsJsonAsync(
             "api/v1/internal/orders/provider-event", payload, cancellationToken);
@@ -97,6 +99,14 @@ public sealed class CoreOrdersClient(HttpClient client)
 public sealed record InboundOrderRequest(string ExternalOrderId, string CustomerName, string CustomerPhone,
     string DeliveryAddress, decimal TotalAmount, double? DeliveryLatitude = null,
     double? DeliveryLongitude = null, string? DeliveryInstructions = null,
-    ProviderDeliveryFulfillment DeliveryFulfillment = ProviderDeliveryFulfillment.MerchantCourier);
+    ProviderDeliveryFulfillment DeliveryFulfillment = ProviderDeliveryFulfillment.MerchantCourier,
+    InboundPayment? Payment = null);
+/// <summary>Values match Core's PaymentMethod enum.</summary>
+public enum InboundPaymentMethod { Online = 1, Cash = 2, Card = 3 }
+public sealed record InboundPayment(InboundPaymentMethod Method, bool IsPaid, decimal? Amount = null,
+    string? Reference = null, DateTimeOffset? PaidAtUtc = null)
+{
+    public object ToCorePayload() => new { Method = (int)Method, IsPaid, Amount, Reference, PaidAtUtc };
+}
 public enum ProviderDeliveryFulfillment { MerchantCourier = 0, ProviderCourier = 1, CustomerPickup = 2 }
 public sealed record CoreOrderResult(Guid Id, bool Duplicate);

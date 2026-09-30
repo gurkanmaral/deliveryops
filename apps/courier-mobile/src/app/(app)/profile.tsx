@@ -2,13 +2,17 @@ import { Button, Card, Pill, Screen } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-context';
 import { stopBackgroundLocation } from '@/features/location/location-task';
 import { registerPushNotifications, scheduleTestOrderNotification, unregisterPushNotifications } from '@/features/notifications/push-notifications';
+import { getShiftSummary, orderKeys } from '@/features/orders/order-api';
 import { availabilityLabels, deliveryStatusLabels } from '@/shared/labels';
+import { useQuery } from '@tanstack/react-query';
 import { colors } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
   const { profile, signOut } = useAuth();
+  const summary = useQuery({ queryKey: orderKeys.shiftSummary, queryFn: getShiftSummary, enabled: !!profile?.isShiftActive });
+  const money = (value: number | undefined) => (value ?? 0).toLocaleString('tr-TR', { style: 'currency', currency: summary.data?.currency ?? 'TRY' });
   const logout = async () => { await unregisterPushNotifications().catch(() => undefined); await stopBackgroundLocation().catch(() => undefined); await signOut(); };
   const enableNotifications = () => registerPushNotifications(true)
     .then(() => Alert.alert('Bildirimler açık', 'Yeni ve atanan paket bildirimlerini alacaksın.'))
@@ -32,6 +36,15 @@ export default function ProfileScreen() {
       <Row icon="bicycle-outline" label="Teslimat durumu" value={profile ? deliveryStatusLabels[profile.deliveryStatus] : '-'} />
       <Row icon="time-outline" label="Vardiya" value={profile?.isShiftActive ? 'Aktif' : 'Kapalı'} last />
     </Card>
+
+    {profile?.isShiftActive ? <>
+      <Text style={styles.section}>Bu vardiya</Text>
+      <Card style={styles.list}>
+        <Row icon="checkmark-done-outline" label="Teslim edilen paket" value={String(summary.data?.deliveredCount ?? 0)} />
+        <Row icon="cash-outline" label="Kasaya teslim edilecek nakit" value={money(summary.data?.cashCollected)} />
+        <Row icon="card-outline" label="Kartla tahsil edilen" value={money(summary.data?.cardCollected)} last />
+      </Card>
+    </> : null}
 
     <Text style={styles.section}>Ayarlar</Text>
     <Card style={styles.list}>

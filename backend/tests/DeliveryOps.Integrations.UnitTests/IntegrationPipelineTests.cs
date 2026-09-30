@@ -35,6 +35,30 @@ public sealed class IntegrationPipelineTests
     }
 
     [Fact]
+    public void Canonical_payload_carries_counter_payment()
+    {
+        string payload = """
+            {"eventId":"POS-7:paid","eventType":"order.paid","externalOrderId":"POS-7","customerName":"Ada",
+             "customerPhone":"05550000000","deliveryAddress":"Kadıköy","totalAmount":120.00,
+             "payment":{"method":"card","status":"paid","amount":120.00,"reference":"AUTH-99"}}
+            """;
+
+        AdaptedOrder result = new CanonicalV1OrderAdapter().Adapt(payload);
+
+        Assert.Equal("order.paid", result.EventType);
+        InboundPayment payment = Assert.IsType<InboundPayment>(result.Order.Payment);
+        Assert.Equal(InboundPaymentMethod.Card, payment.Method);
+        Assert.True(payment.IsPaid);
+        Assert.Equal("AUTH-99", payment.Reference);
+    }
+
+    [Theory]
+    [InlineData("""{"eventType":"order.paid","externalOrderId":"POS-8","customerName":"Ada","customerPhone":"1","deliveryAddress":"A","totalAmount":1}""")]
+    [InlineData("""{"externalOrderId":"POS-8","customerName":"Ada","customerPhone":"1","deliveryAddress":"A","totalAmount":1,"payment":{"method":"cheque"}}""")]
+    public void Canonical_payload_rejects_invalid_payment(string payload) =>
+        Assert.Throws<ProviderPayloadException>(() => new CanonicalV1OrderAdapter().Adapt(payload));
+
+    [Fact]
     public void Retry_policy_moves_event_to_dead_letter_after_max_attempts()
     {
         DateTimeOffset now = new(2026, 9, 18, 10, 0, 0, TimeSpan.Zero);

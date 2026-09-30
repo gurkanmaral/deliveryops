@@ -1,8 +1,8 @@
 <Window x:Class="DeliveryOps.PosBridge.Wpf.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="DeliveryOps POS Bridge" Width="1120" Height="760" MinWidth="920" MinHeight="660"
-        Background="{StaticResource CanvasBrush}" WindowStartupLocation="CenterScreen" FontFamily="Segoe UI">
+        Title="DeliveryOps POS Bridge" Width="1360" Height="840" MinWidth="1180" MinHeight="700"
+        Background="{StaticResource CanvasBrush}" WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" Language="tr-TR">
     <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="268"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <Border Grid.Column="0">
@@ -27,35 +27,198 @@
             </Grid>
         </Border>
 
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="40,34,40,46">
-                <Grid Margin="0,0,0,28">
-                    <StackPanel><TextBlock Text="MASAÜSTÜ BAĞLANTISI" Foreground="{StaticResource PrimaryBrush}" FontSize="10" FontWeight="Bold"/><TextBlock Text="POS operasyon merkezi" Margin="0,7,0,0" FontSize="30" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/><TextBlock Text="Sipariş klasörünü izleyin, doğrulayın ve DeliveryOps'a güvenle aktarın." Margin="0,7,0,0" Foreground="{StaticResource MutedBrush}" FontSize="14"/></StackPanel>
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Padding="12,8" CornerRadius="20" Background="{StaticResource CyanSoftBrush}"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="#0D9488" VerticalAlignment="Center"/><TextBlock Text=" Şifreli bağlantı" Foreground="#087A82" FontSize="11" FontWeight="SemiBold"/></StackPanel></Border>
-                </Grid>
-                <Border Padding="24" Background="{StaticResource SurfaceBrush}" CornerRadius="20" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,22"><Border Width="38" Height="38" CornerRadius="12" Background="{StaticResource PrimarySoftBrush}"><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" Foreground="{StaticResource PrimaryBrush}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="11,0,0,0" VerticalAlignment="Center"><TextBlock Text="Bağlantı ayarları" Foreground="{StaticResource InkBrush}" FontSize="16" FontWeight="Bold"/><TextBlock Text="Panelden oluşturulan POS webhook bilgileri" Foreground="{StaticResource MutedBrush}" FontSize="11"/></StackPanel></StackPanel>
-                        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="20"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0"><TextBlock Text="Webhook URL" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,18" Text="{Binding WebhookUrl, UpdateSourceTrigger=PropertyChanged}"/><TextBlock Text="POS sipariş klasörü" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,0" Text="{Binding InboxDirectory, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
-                            <StackPanel Grid.Column="2"><TextBlock Text="X-DeliveryOps-Key" Style="{StaticResource FieldLabel}"/><PasswordBox x:Name="SecretBox" Margin="0,8,0,18" PasswordChanged="SecretBox_OnPasswordChanged"/><TextBlock Text="Kontrol aralığı (saniye)" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,0" Text="{Binding PollIntervalSeconds, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+        <TabControl Grid.Column="1" Margin="24,18,24,18" Background="Transparent" BorderThickness="0" FontSize="13">
+                <TabItem Header="Kasa">
+                    <Grid DataContext="{Binding Cashier}" Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="390"/></Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="240"/></Grid.RowDefinitions>
+                            <ListBox ItemsSource="{Binding Categories}" SelectedItem="{Binding SelectedCategory}" DisplayMemberPath="Name" BorderThickness="0" Background="Transparent" FontSize="13" FontWeight="SemiBold">
+                                <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,0,8,8"/></Style></ListBox.ItemContainerStyle>
+                            </ListBox>
+                            <TextBlock Grid.Row="1" Margin="0,24,0,0" Text="Menü boş. Menü sekmesinden kategori ve ürün ekleyin." Foreground="{StaticResource MutedBrush}" FontSize="14" Visibility="{Binding ShowMenuHint, Converter={StaticResource BoolToVisibility}}"/>
+                            <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Products}">
+                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Width="168" Height="86" Margin="0,0,10,10" Style="{StaticResource SecondaryButton}"
+                                                    Command="{Binding DataContext.AddProductCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" TextWrapping="Wrap" TextAlignment="Center" FontSize="13"/>
+                                                    <TextBlock Text="{Binding Price, StringFormat={}{0:N2} ₺}" HorizontalAlignment="Center" Margin="0,5,0,0" FontWeight="Bold"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <Grid Grid.Row="2" Margin="0,14,0,10">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center"><TextBlock Text="Son siparişler" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/><TextBlock Text="Sonradan alınan ödemeyi işaretleyin; panele anında yansır." Foreground="{StaticResource MutedBrush}" FontSize="11"/></StackPanel>
+                                <TextBox Grid.Column="1" Margin="0,0,10,0" Text="{Binding LaterPaymentReference, UpdateSourceTrigger=PropertyChanged}" ToolTip="NarPOS fiş / onay no (isteğe bağlı)"/>
+                                <Button Grid.Column="2" Content="Yenile" Style="{StaticResource SecondaryButton}" Command="{Binding RefreshOrdersCommand}"/>
+                            </Grid>
+                            <ListView Grid.Row="3" ItemsSource="{Binding RecentOrders}" BorderThickness="1" BorderBrush="{StaticResource LineBrush}" Background="#FAFBFF">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="SAAT" Width="55" DisplayMemberBinding="{Binding Time}"/>
+                                        <GridViewColumn Header="SİPARİŞ" Width="230" DisplayMemberBinding="{Binding Title}"/>
+                                        <GridViewColumn Header="TUTAR" Width="90" DisplayMemberBinding="{Binding Total}"/>
+                                        <GridViewColumn Header="ÖDEME" Width="165" DisplayMemberBinding="{Binding PaymentText}"/>
+                                        <GridViewColumn Header="" Width="200">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" Visibility="{Binding CanMarkPaid, Converter={StaticResource BoolToVisibility}}">
+                                                        <Button Content="Nakit alındı" Height="30" Padding="10,0" Style="{StaticResource SecondaryButton}"
+                                                                Command="{Binding DataContext.MarkPaidCashCommand, RelativeSource={RelativeSource AncestorType=ListView}}" CommandParameter="{Binding}"/>
+                                                        <Button Content="Kart alındı" Height="30" Padding="10,0" Margin="6,0,0,0" Style="{StaticResource SecondaryButton}"
+                                                                Command="{Binding DataContext.MarkPaidCardCommand, RelativeSource={RelativeSource AncestorType=ListView}}" CommandParameter="{Binding}"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
                         </Grid>
-                    </StackPanel>
-                </Border>
-                <TextBlock Text="{Binding ValidationMessage}" Margin="3,11,0,0" Foreground="#D04458" TextWrapping="Wrap" FontSize="12"/>
-                <StackPanel Orientation="Horizontal" Margin="0,18,0,26">
-                    <Button Command="{Binding SaveCommand}" Style="{StaticResource SecondaryButton}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Ayarları kaydet"/></StackPanel></Button>
-                    <Button Command="{Binding StartCommand}" Style="{StaticResource PrimaryButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Bridge'i başlat"/></StackPanel></Button>
-                    <Button Command="{Binding StopCommand}" Style="{StaticResource DangerButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Durdur"/></StackPanel></Button>
-                    <Button Command="{Binding ProcessNowCommand}" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Şimdi kontrol et"/></StackPanel></Button>
-                </StackPanel>
-                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="20" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
-                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="290"/></Grid.RowDefinitions>
-                        <Grid Margin="22,19"><StackPanel Orientation="Horizontal"><Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource CyanSoftBrush}"><TextBlock Text="&#xE9D9;" FontFamily="Segoe Fluent Icons" Foreground="#0794A9" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="10,0,0,0"><TextBlock Text="İşlem günlüğü" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/><TextBlock Text="Dosya aktarım ve doğrulama olayları" Foreground="{StaticResource MutedBrush}" FontSize="10"/></StackPanel></StackPanel><TextBlock Text="{Binding LastCycleText}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#8993A8" FontSize="11"/></Grid>
-                        <ListView Grid.Row="1" ItemsSource="{Binding Logs}" BorderThickness="0" Background="#FAFBFF"><ListView.View><GridView><GridViewColumn Header="ZAMAN" Width="150" DisplayMemberBinding="{Binding Timestamp, StringFormat={}{0:dd.MM.yyyy HH:mm:ss}}"/><GridViewColumn Header="SEVİYE" Width="90" DisplayMemberBinding="{Binding Level}"/><GridViewColumn Header="SİPARİŞ" Width="155" DisplayMemberBinding="{Binding ExternalOrderId}"/><GridViewColumn Header="MESAJ" Width="365" DisplayMemberBinding="{Binding Message}"/></GridView></ListView.View></ListView>
+                        <Border Grid.Column="2" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <Grid>
+                                        <TextBlock Text="Sepet" FontSize="17" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                                        <Button HorizontalAlignment="Right" Content="Temizle" Height="30" Padding="10,0" Style="{StaticResource DangerButton}" Command="{Binding ClearCartCommand}"/>
+                                    </Grid>
+                                    <ItemsControl Margin="0,12,0,0" ItemsSource="{Binding CartLines}" MinHeight="60">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,8">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{StaticResource InkBrush}"/>
+                                                    <Button Grid.Column="1" Content="−" Width="30" Height="30" Padding="0" Style="{StaticResource SecondaryButton}"
+                                                            Command="{Binding DataContext.DecreaseLineCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Quantity}" Width="28" TextAlignment="Center" VerticalAlignment="Center" FontWeight="Bold"/>
+                                                    <Button Grid.Column="3" Content="+" Width="30" Height="30" Padding="0" Style="{StaticResource SecondaryButton}"
+                                                            Command="{Binding DataContext.IncreaseLineCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding LineTotal, StringFormat={}{0:N2} ₺}" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,6,0,10"/>
+                                    <Grid><TextBlock Text="Toplam" FontSize="15" FontWeight="SemiBold"/><TextBlock HorizontalAlignment="Right" Text="{Binding TotalText}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/></Grid>
+                                    <CheckBox Margin="0,16,0,0" Content="Gel-al (müşteri mağazadan alacak)" IsChecked="{Binding IsPickup}"/>
+                                    <TextBlock Margin="0,12,0,6" Text="Müşteri adı" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding CustomerName, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBlock Margin="0,10,0,6" Text="Telefon" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding CustomerPhone, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <StackPanel Visibility="{Binding IsDelivery, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Margin="0,10,0,6" Text="Teslimat adresi" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding CustomerAddress, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+                                    <TextBlock Margin="0,10,0,6" Text="Not (kurye ve mutfak görür)" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding CustomerNote, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBlock Margin="0,10,0,6" Text="Ödeme" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox Height="40" ItemsSource="{Binding PaymentOptions}" SelectedItem="{Binding SelectedPaymentOption}" DisplayMemberPath="Label" VerticalContentAlignment="Center"/>
+                                    <StackPanel Visibility="{Binding ShowPaymentReference, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Margin="0,10,0,6" Text="NarPOS fiş / onay no (isteğe bağlı)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding PaymentReference, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource MutedBrush}" Text="Ödemeyi NarPOS cihazında tamamladıktan sonra siparişi gönderin; sipariş panelde ödendi olarak görünür."/>
+                                    </StackPanel>
+                                    <Button Margin="0,16,0,0" Style="{StaticResource PrimaryButton}" Command="{Binding SubmitCommand}">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE724;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Siparişi gönder"/></StackPanel>
+                                    </Button>
+                                    <TextBlock Margin="0,10,0,0" Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" Foreground="#4D5870"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
-                </Border>
-            </StackPanel>
-        </ScrollViewer>
+                </TabItem>
+                <TabItem Header="Menü">
+                    <Grid DataContext="{Binding Menu}" Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="320"/></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Text="Kategoriler" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                            <Grid DockPanel.Dock="Top" Margin="0,10,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding NewCategoryName, UpdateSourceTrigger=PropertyChanged}" ToolTip="Yeni kategori adı"/>
+                                <Button Grid.Column="1" Margin="8,0,0,0" Content="Ekle" Style="{StaticResource PrimaryButton}" Command="{Binding AddCategoryCommand}"/>
+                            </Grid>
+                            <Button DockPanel.Dock="Bottom" Margin="0,10,0,0" Content="Kategoriyi sil" Style="{StaticResource DangerButton}" Command="{Binding DeleteCategoryCommand}"/>
+                            <ListBox ItemsSource="{Binding Categories}" SelectedItem="{Binding SelectedCategory}" DisplayMemberPath="Name" FontSize="13"/>
+                        </DockPanel>
+                        <DockPanel Grid.Column="2">
+                            <TextBlock DockPanel.Dock="Top" Text="Ürünler" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}" Margin="0,0,0,10"/>
+                            <ListView ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" Background="#FAFBFF">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="ÜRÜN" Width="220" DisplayMemberBinding="{Binding Name}"/>
+                                        <GridViewColumn Header="FİYAT" Width="100" DisplayMemberBinding="{Binding Price, StringFormat={}{0:N2} ₺}"/>
+                                        <GridViewColumn Header="SATIŞTA" Width="150">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding IsAvailable, Mode=OneWay}" ToolTip="Satışa aç / kapat"
+                                                              Command="{Binding DataContext.ToggleAvailabilityCommand, RelativeSource={RelativeSource AncestorType=ListView}}" CommandParameter="{Binding}"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </DockPanel>
+                        <Border Grid.Column="4" Padding="18" Background="{StaticResource SurfaceBrush}" CornerRadius="18" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" VerticalAlignment="Top">
+                            <StackPanel>
+                                <TextBlock Text="{Binding ProductFormTitle}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                                <TextBlock Margin="0,12,0,6" Text="Ürün adı" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding ProductName, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Margin="0,10,0,6" Text="Fiyat (₺)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding ProductPrice, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Margin="0,10,0,6" Text="Açıklama (isteğe bağlı)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding ProductDescription, UpdateSourceTrigger=PropertyChanged}"/>
+                                <CheckBox Margin="0,12,0,0" Content="Satışta" IsChecked="{Binding ProductAvailable}"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <Button Content="Kaydet" Style="{StaticResource PrimaryButton}" Command="{Binding SaveProductCommand}"/>
+                                    <Button Content="Yeni" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}" Command="{Binding NewProductCommand}"/>
+                                    <Button Content="Sil" Margin="8,0,0,0" Style="{StaticResource DangerButton}" Command="{Binding DeleteProductCommand}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="5" Margin="0,12,0,0" Text="{Binding Message}" Foreground="#4D5870" TextWrapping="Wrap"/>
+                    </Grid>
+                </TabItem>
+                <TabItem Header="Bağlantı">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="40,34,40,46">
+                        <Grid Margin="0,0,0,28">
+                            <StackPanel><TextBlock Text="MASAÜSTÜ BAĞLANTISI" Foreground="{StaticResource PrimaryBrush}" FontSize="10" FontWeight="Bold"/><TextBlock Text="POS operasyon merkezi" Margin="0,7,0,0" FontSize="30" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/><TextBlock Text="Sipariş klasörünü izleyin, doğrulayın ve DeliveryOps'a güvenle aktarın." Margin="0,7,0,0" Foreground="{StaticResource MutedBrush}" FontSize="14"/></StackPanel>
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Padding="12,8" CornerRadius="20" Background="{StaticResource CyanSoftBrush}"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="#0D9488" VerticalAlignment="Center"/><TextBlock Text=" Şifreli bağlantı" Foreground="#087A82" FontSize="11" FontWeight="SemiBold"/></StackPanel></Border>
+                        </Grid>
+                        <Border Padding="24" Background="{StaticResource SurfaceBrush}" CornerRadius="20" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,22"><Border Width="38" Height="38" CornerRadius="12" Background="{StaticResource PrimarySoftBrush}"><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" Foreground="{StaticResource PrimaryBrush}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="11,0,0,0" VerticalAlignment="Center"><TextBlock Text="Bağlantı ayarları" Foreground="{StaticResource InkBrush}" FontSize="16" FontWeight="Bold"/><TextBlock Text="Panelden oluşturulan POS webhook bilgileri" Foreground="{StaticResource MutedBrush}" FontSize="11"/></StackPanel></StackPanel>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="20"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0"><TextBlock Text="Webhook URL" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,18" Text="{Binding WebhookUrl, UpdateSourceTrigger=PropertyChanged}"/><TextBlock Text="POS sipariş klasörü" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,0" Text="{Binding InboxDirectory, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                                    <StackPanel Grid.Column="2"><TextBlock Text="X-DeliveryOps-Key" Style="{StaticResource FieldLabel}"/><PasswordBox x:Name="SecretBox" Margin="0,8,0,18" PasswordChanged="SecretBox_OnPasswordChanged"/><TextBlock Text="Kontrol aralığı (saniye)" Style="{StaticResource FieldLabel}"/><TextBox Margin="0,8,0,0" Text="{Binding PollIntervalSeconds, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="{Binding ValidationMessage}" Margin="3,11,0,0" Foreground="#D04458" TextWrapping="Wrap" FontSize="12"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,18,0,26">
+                            <Button Command="{Binding SaveCommand}" Style="{StaticResource SecondaryButton}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Ayarları kaydet"/></StackPanel></Button>
+                            <Button Command="{Binding StartCommand}" Style="{StaticResource PrimaryButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Bridge'i başlat"/></StackPanel></Button>
+                            <Button Command="{Binding StopCommand}" Style="{StaticResource DangerButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71A;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Durdur"/></StackPanel></Button>
+                            <Button Command="{Binding ProcessNowCommand}" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" Margin="0,0,8,0"/><TextBlock Text="Şimdi kontrol et"/></StackPanel></Button>
+                        </StackPanel>
+                        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="20" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="290"/></Grid.RowDefinitions>
+                                <Grid Margin="22,19"><StackPanel Orientation="Horizontal"><Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource CyanSoftBrush}"><TextBlock Text="&#xE9D9;" FontFamily="Segoe Fluent Icons" Foreground="#0794A9" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="10,0,0,0"><TextBlock Text="İşlem günlüğü" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/><TextBlock Text="Dosya aktarım ve doğrulama olayları" Foreground="{StaticResource MutedBrush}" FontSize="10"/></StackPanel></StackPanel><TextBlock Text="{Binding LastCycleText}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#8993A8" FontSize="11"/></Grid>
+                                <ListView Grid.Row="1" ItemsSource="{Binding Logs}" BorderThickness="0" Background="#FAFBFF"><ListView.View><GridView><GridViewColumn Header="ZAMAN" Width="150" DisplayMemberBinding="{Binding Timestamp, StringFormat={}{0:dd.MM.yyyy HH:mm:ss}}"/><GridViewColumn Header="SEVİYE" Width="90" DisplayMemberBinding="{Binding Level}"/><GridViewColumn Header="SİPARİŞ" Width="155" DisplayMemberBinding="{Binding ExternalOrderId}"/><GridViewColumn Header="MESAJ" Width="365" DisplayMemberBinding="{Binding Message}"/></GridView></ListView.View></ListView>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+                </TabItem>
+            </TabControl>
     </Grid>
 </Window>

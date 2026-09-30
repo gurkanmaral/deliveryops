@@ -35,6 +35,13 @@ interface Order {
   dispatchAttemptCount: number
   dispatchLastReason?: string
   dispatchNextAttemptAtUtc?: string
+  paymentMethod?: number
+  paymentStatus?: number
+  paidAmount?: number
+  paidAtUtc?: string
+  paymentReference?: string
+  paymentChannel?: number
+  deliveredDistanceMeters?: number
 }
 
 interface DispatchQueueItem {
@@ -73,6 +80,10 @@ interface DispatchAttempt {
 
 const statuses = ['Yeni', 'Onaylandı', 'Kurye bekliyor', 'Atandı', 'Teslim alındı', 'Yolda', 'Teslim edildi', 'İptal', 'Teslim edilemedi', 'İade']
 const sources = ['Telefon', 'Yönetici paneli', 'İşletme paneli', 'Yemeksepeti', 'Getir', 'POS', 'Diğer', 'Trendyol']
+// Values match the backend PaymentMethod / PaymentChannel enums.
+const paymentMethods = ['Belirtilmedi', 'Online', 'Nakit', 'Kart']
+const paymentChannels = ['kasa', 'kurye', 'sağlayıcı', 'panel']
+const farDeliveryMeters = 300
 const availabilityLabels = ['Çevrimdışı', 'Müsait', 'Molada', 'Mesai dışı']
 const deliveryLabels = ['Atama bekliyor', 'İşletmeye gidiyor', 'Teslimatta']
 
@@ -124,6 +135,7 @@ export function OrdersPage() {
   const [phone, setPhone] = useState('')
   const [address, setAddress] = useState('')
   const [amount, setAmount] = useState('')
+  const [paymentChoice, setPaymentChoice] = useState('0:false')
   const createIdempotencyKey = useRef(crypto.randomUUID())
   const [selectedDispatchOrderId, setSelectedDispatchOrderId] = useState<string | null>(null)
   const canWrite = auth.hasPermission('orders.write')
@@ -138,11 +150,12 @@ export function OrdersPage() {
     void client.invalidateQueries({ queryKey: ['courier-suggestions'] })
   }
   const create = useMutation({
-    mutationFn: () => postIdempotentJson<Order>('/api/v1/orders/phone', { businessId: activeBusinessId, branchId, customerName, customerPhone: phone, deliveryAddress: address, totalAmount: Number(amount) }, createIdempotencyKey.current),
-    onSuccess: () => { createIdempotencyKey.current = crypto.randomUUID(); setCustomerName(''); setPhone(''); setAddress(''); setAmount(''); refresh() },
+    mutationFn: () => postIdempotentJson<Order>('/api/v1/orders/phone', { businessId: activeBusinessId, branchId, customerName, customerPhone: phone, deliveryAddress: address, totalAmount: Number(amount), paymentMethod: Number(paymentChoice.split(':')[0]), isPaid: paymentChoice.endsWith(':true') }, createIdempotencyKey.current),
+    onSuccess: () => { createIdempotencyKey.current = crypto.randomUUID(); setCustomerName(''); setPhone(''); setAddress(''); setAmount(''); setPaymentChoice('0:false'); refresh() },
   })
   const changeStatus = useMutation({ mutationFn: ({ id, status }: { id: string; status: number }) => requestJson<Order>(`/api/v1/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), onSuccess: refresh })
   const assign = useMutation({ mutationFn: ({ id, courierId }: { id: string; courierId: string }) => requestJson<Order>(`/api/v1/orders/${id}/courier`, { method: 'PUT', body: JSON.stringify({ courierId }) }), onSuccess: refresh })
+  const recordPayment = useMutation({ mutationFn: ({ id, method }: { id: string; method: number }) => postJson<Order>(`/api/v1/orders/${id}/payment`, { method }), onSuccess: refresh })
   const retryDispatch = useMutation({ mutationFn: (id: string) => postJson<void>(`/api/v1/dispatch/orders/${id}/retry`, {}), onSuccess: refresh })
   const availableOrders = dispatchQueue.data?.items ?? []
   const activeCouriers = couriers.data?.items.filter(courier => courier.isActive) ?? []
@@ -202,6 +215,7 @@ export function OrdersPage() {
         <label>Telefon<input value={phone} onChange={event => setPhone(event.target.value)} required /></label>
         <label className="inline-form__wide">Teslimat adresi<input value={address} onChange={event => setAddress(event.target.value)} required /></label>
         <label>Tutar<input type="number" min="0" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} required /></label>
+        <label>Ödeme<select value={paymentChoice} onChange={event => setPaymentChoice(event.target.value)}><option value="0:false">Belirtilmedi</option><option value="2:false">Kapıda nakit</option><option value="3:false">Kapıda kart</option><option value="3:true">Kartla ödendi</option><option value="2:true">Nakit ödendi</option><option value="1:true">Online ödendi</option></select></label>
         <button className="primary-button" disabled={!branchId || create.isPending}><Plus size={17} /> Sipariş oluştur</button>
       </form>
       {create.error && <p className="form-error form-error--panel">{create.error.message}</p>}
@@ -223,13 +237,14 @@ export function OrdersPage() {
         <button className="secondary-button order-filter-clear" onClick={clearFilters} disabled={!hasFilters}><FilterX size={15} /> Temizle</button>
       </div>
       {orders.error && <p className="form-error form-error--panel">{orders.error.message}</p>}
-      <div className="table-wrap"><table><thead><tr><th><button className="table-sort" onClick={() => toggleSort('created')}>Sipariş <ArrowDownUp size={12} /></button></th><th>Müşteri</th><th>Adres</th><th>Kurye</th><th><button className="table-sort" onClick={() => toggleSort('status')}>Durum <ArrowDownUp size={12} /></button></th><th>Kaynak</th><th>İşlem</th></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th><button className="table-sort" onClick={() => toggleSort('created')}>Sipariş <ArrowDownUp size={12} /></button></th><th>Müşteri</th><th>Adres</th><th>Kurye</th><th><button className="table-sort" onClick={() => toggleSort('status')}>Durum <ArrowDownUp size={12} /></button></th><th>Ödeme</th><th>Kaynak</th><th>İşlem</th></tr></thead><tbody>
         {orders.data?.items.map(order => <tr key={order.id}>
           <td><strong>#{order.id.slice(0, 8)}</strong><small className="cell-sub">₺{order.totalAmount.toFixed(2)} · {new Date(order.createdAtUtc).toLocaleDateString('tr-TR')}</small></td>
           <td>{order.customerName}<small className="cell-sub">{order.customerPhone}</small></td>
-          <td className="truncate-cell">{order.deliveryAddress}</td>
+          <td className="truncate-cell">{order.deliveryAddress}{order.deliveredDistanceMeters != null && order.deliveredDistanceMeters > farDeliveryMeters && <small className="cell-sub cell-warning" title="Kurye 'teslim ettim' dediğinde adrese bu kadar uzaktaydı">⚠ Teslim adresten {Math.round(order.deliveredDistanceMeters)} m uzakta işaretlendi</small>}</td>
           <td>{canAssign ? <select className="table-select" value={order.courierId ?? ''} onChange={event => event.target.value && assign.mutate({ id: order.id, courierId: event.target.value })} disabled={order.status !== 1 && order.status !== 2 && order.status !== 3}><option value="">Kurye seçin</option>{activeCouriers.map(courier => <option key={courier.id} value={courier.id}>{courier.firstName} {courier.lastName}</option>)}</select> : activeCouriers.find(x => x.id === order.courierId)?.firstName ?? 'Atanmadı'}</td>
           <td><span className={`pill pill--${order.status === 6 ? 'green' : order.status === 7 || order.status === 8 ? 'red' : order.status === 2 ? 'amber' : 'blue'}`}>{statuses[order.status]}</span></td>
+          <td><PaymentCell order={order} canRecord={canWrite} onRecord={method => recordPayment.mutate({ id: order.id, method })} /></td>
           <td><span className="order-source">{sources[order.source]}</span></td>
           <td>{canTransition ? <OrderAction order={order} onChange={status => changeStatus.mutate({ id: order.id, status })} /> : <span className="muted">—</span>}</td>
         </tr>)}
@@ -269,6 +284,20 @@ function formatWait(createdAtUtc: string) {
 function triggerLabel(trigger: string) {
   const labels: Record<string, string> = { Automatic: 'Otomatik atama', ManualRetry: 'Manuel tekrar', ManualAssignment: 'Manuel atama', ManualReassignment: 'Kurye değişimi', SelfClaim: 'Kurye üstlendi' }
   return labels[trigger] ?? trigger
+}
+
+function PaymentCell({ order, canRecord, onRecord }: { order: Order; canRecord: boolean; onRecord(method: number): void }) {
+  const method = order.paymentMethod ?? 0
+  if (order.paymentStatus === 1) {
+    const channel = order.paymentChannel != null ? ` · ${paymentChannels[order.paymentChannel]}` : ''
+    const reference = order.paymentReference ? ` · ${order.paymentReference}` : ''
+    return <span className="pill pill--green" title={order.paidAtUtc ? new Date(order.paidAtUtc).toLocaleString('tr-TR') : undefined}>Ödendi ({paymentMethods[method]}{channel}){reference}</span>
+  }
+  const label = method === 2 ? 'Kapıda nakit' : method === 3 ? 'Kapıda kart' : 'Ödenmedi'
+  const closed = order.status === 7 || order.status === 9
+  return <span className="payment-cell"><span className={`pill pill--${method === 0 ? 'blue' : 'amber'}`}>{label}</span>
+    {canRecord && !closed && <select className="table-select" value="" aria-label="Ödeme alındı olarak işaretle" onChange={event => event.target.value && onRecord(Number(event.target.value))}><option value="">Ödeme alındı…</option><option value="2">Nakit</option><option value="3">Kart</option></select>}
+  </span>
 }
 
 function OrderAction({ order, onChange }: { order: Order; onChange(status: number): void }) {

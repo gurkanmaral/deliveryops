@@ -17,6 +17,11 @@ public sealed class CouriersController(ISender sender) : ApiControllerBase
     public async Task<ActionResult<CurrentCourierResponse>> Me(CancellationToken cancellationToken) =>
         FromResult(await sender.Send(new GetCurrentCourierQuery(), cancellationToken));
 
+    [HttpGet("me/shift-summary")]
+    public async Task<ActionResult<DeliveryOps.Core.Queries.Orders.CourierShiftSummaryResponse>> ShiftSummary(
+        CancellationToken cancellationToken) =>
+        FromResult(await sender.Send(new DeliveryOps.Core.Queries.Orders.GetCourierShiftSummaryQuery(), cancellationToken));
+
     [HttpGet]
     [Authorize(Policy = Permissions.CouriersRead)]
     public async Task<ActionResult<PagedResponse<CourierResponse>>> GetAll(

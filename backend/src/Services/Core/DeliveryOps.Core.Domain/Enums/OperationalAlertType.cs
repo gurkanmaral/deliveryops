@@ -7,5 +7,6 @@ public enum OperationalAlertType
     DeliveryDelayed,
     CourierLocationStale,
     LowCreditBalance,
-    IntegrationConnectionUnavailable
+    IntegrationConnectionUnavailable,
+    ProviderCancelledAfterPickup
 }

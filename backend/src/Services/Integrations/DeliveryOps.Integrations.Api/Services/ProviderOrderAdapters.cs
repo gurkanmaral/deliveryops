@@ -31,20 +31,48 @@ public sealed class CanonicalV1OrderAdapter : IOrderProviderAdapter
         if (envelope is null) throw new ProviderPayloadException("Webhook gövdesi boş olamaz.");
         ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(envelope.DeliveryLatitude,
             envelope.DeliveryLongitude, "canonical");
+        string eventType = string.IsNullOrWhiteSpace(envelope.EventType) ? "order.created" : envelope.EventType.Trim();
+        InboundPayment? payment = ReadPayment(envelope.Payment);
+        if (string.Equals(eventType, "order.paid", StringComparison.OrdinalIgnoreCase) &&
+            (payment is null || !payment.IsPaid))
+            throw new ProviderPayloadException("order.paid olayında ödenmiş bir payment bloğu zorunludur.");
         InboundOrderRequest order = new(envelope.ExternalOrderId, envelope.CustomerName,
             envelope.CustomerPhone, envelope.DeliveryAddress, envelope.TotalAmount, coordinates.Latitude,
             coordinates.Longitude, ProviderPayload.NormalizeOptional(envelope.DeliveryInstructions),
-            envelope.DeliveryFulfillment);
+            envelope.DeliveryFulfillment, payment);
         ProviderPayload.ValidateOrder(order);
         string eventId = string.IsNullOrWhiteSpace(envelope.EventId) ? order.ExternalOrderId : envelope.EventId.Trim();
-        string eventType = string.IsNullOrWhiteSpace(envelope.EventType) ? "order.created" : envelope.EventType.Trim();
         return ProviderPayload.Complete(rawPayload, eventId, eventType, order);
+    }
+
+    private static InboundPayment? ReadPayment(CanonicalPayment? payment)
+    {
+        if (payment is null) return null;
+        InboundPaymentMethod method = payment.Method?.Trim().ToLowerInvariant() switch
+        {
+            "cash" or "nakit" => InboundPaymentMethod.Cash,
+            "card" or "kart" or "credit_card" or "creditcard" => InboundPaymentMethod.Card,
+            "online" => InboundPaymentMethod.Online,
+            _ => throw new ProviderPayloadException("payment.method cash, card veya online olmalıdır.")
+        };
+        string? status = payment.Status?.Trim().ToLowerInvariant();
+        if (status is not (null or "" or "paid" or "unpaid"))
+            throw new ProviderPayloadException("payment.status paid veya unpaid olmalıdır.");
+        if (payment.Amount is < 0 or > 100_000_000)
+            throw new ProviderPayloadException("payment.amount geçersiz.");
+        string? reference = ProviderPayload.NormalizeOptional(payment.Reference);
+        if (reference?.Length > 100) throw new ProviderPayloadException("payment.reference en fazla 100 karakter olabilir.");
+        return new InboundPayment(method, status == "paid", payment.Amount, reference, payment.PaidAtUtc);
     }
 
     private sealed record CanonicalOrderEnvelope(string? EventId, string? EventType, string ExternalOrderId,
         string CustomerName, string CustomerPhone, string DeliveryAddress, decimal TotalAmount,
         double? DeliveryLatitude, double? DeliveryLongitude, string? DeliveryInstructions,
-        ProviderDeliveryFulfillment DeliveryFulfillment = ProviderDeliveryFulfillment.MerchantCourier);
+        ProviderDeliveryFulfillment DeliveryFulfillment = ProviderDeliveryFulfillment.MerchantCourier,
+        CanonicalPayment? Payment = null);
+
+    private sealed record CanonicalPayment(string? Method, string? Status, decimal? Amount, string? Reference,
+        DateTimeOffset? PaidAtUtc);
 }
 
 public sealed class YemeksepetiPartnerV2OrderAdapter : IOrderProviderAdapter
