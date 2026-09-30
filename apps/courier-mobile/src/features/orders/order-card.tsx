@@ -1,6 +1,6 @@
 import { Button, Card, Pill } from '@/components/ui';
 import { orderSourceLabels, orderStatusLabels } from '@/shared/labels';
-import { OrderStatus, type Order } from '@/shared/types';
+import { OrderStatus, PaymentMethod, PaymentStatus, type Order } from '@/shared/types';
 import { colors, type Tone } from '@/theme/colors';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
@@ -37,7 +37,16 @@ export function OrderCard({ order, available, busy, highlighted, onClaim, onTran
     : order.deliveryAddress;
   const navigate = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate`)
     .catch(() => Alert.alert('Harita açılamadı', 'Cihazda yol tarifi açabilecek bir harita uygulaması bulunamadı.'));
+  const payment = describePayment(order);
+  const confirmCollection = (status: OrderStatus) => new Promise<boolean>(resolve => {
+    if (status !== OrderStatus.Delivered || !payment.collectAtDoor) return resolve(true);
+    Alert.alert('Tahsilatı onayla', `${payment.amountText} ${payment.methodText} tahsil ettin mi?`, [
+      { text: 'Hayır', style: 'cancel', onPress: () => resolve(false) },
+      { text: 'Evet, tahsil ettim', onPress: () => resolve(true) },
+    ], { cancelable: true, onDismiss: () => resolve(false) });
+  });
   const transition = async (status: OrderStatus) => {
+    if (!(await confirmCollection(status))) return;
     try {
       await onTransition?.(status);
       if (status === OrderStatus.OnTheWay) await navigate();
@@ -65,6 +74,10 @@ export function OrderCard({ order, available, busy, highlighted, onClaim, onTran
       <Ionicons name="location" size={18} color={colors.primary} />
       <Text style={styles.addressText}>{order.deliveryAddress}</Text>
     </View>
+    {!available ? <View style={[styles.payment, payment.collectAtDoor ? styles.paymentCollect : payment.paid ? styles.paymentPaid : styles.paymentUnknown]}>
+      <Ionicons name={payment.icon} size={18} color={payment.collectAtDoor ? colors.warning : payment.paid ? colors.success : colors.textMuted} />
+      <Text style={[styles.paymentText, payment.collectAtDoor && styles.paymentTextStrong]}>{payment.label}</Text>
+    </View> : null}
     {order.deliveryInstructions ? <View style={styles.instructions}><Ionicons name="information-circle-outline" size={17} color={colors.accent} /><Text style={styles.instructionsText}>{order.deliveryInstructions}</Text></View> : null}
 
     <View style={styles.quickActions}>
@@ -90,7 +103,26 @@ export function OrderCard({ order, available, busy, highlighted, onClaim, onTran
   </Card>;
 }
 
+type PaymentView = { label: string; icon: keyof typeof Ionicons.glyphMap; collectAtDoor: boolean; paid: boolean; amountText: string; methodText: string };
+
+function describePayment(order: Order): PaymentView {
+  const amountText = order.totalAmount.toLocaleString('tr-TR', { style: 'currency', currency: order.currency });
+  const paid = order.paymentStatus === PaymentStatus.Paid;
+  const method = order.paymentMethod ?? PaymentMethod.Unspecified;
+  if (paid) return { label: method === PaymentMethod.Online ? 'Online ödendi · tahsilat yok' : 'Ödendi · tahsilat yok', icon: 'checkmark-circle', collectAtDoor: false, paid, amountText, methodText: '' };
+  if (method === PaymentMethod.Cash) return { label: `Kapıda NAKİT tahsil et: ${amountText}`, icon: 'cash-outline', collectAtDoor: true, paid, amountText, methodText: 'nakit' };
+  if (method === PaymentMethod.Card) return { label: `Kapıda KART ile tahsil et: ${amountText}`, icon: 'card-outline', collectAtDoor: true, paid, amountText, methodText: 'kartla' };
+  if (method === PaymentMethod.Online) return { label: 'Online ödendi · tahsilat yok', icon: 'checkmark-circle', collectAtDoor: false, paid: true, amountText, methodText: '' };
+  return { label: 'Ödeme bilgisi yok · işletmeye danış', icon: 'help-circle-outline', collectAtDoor: false, paid, amountText, methodText: '' };
+}
+
 const styles = StyleSheet.create({
+  payment: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12 },
+  paymentCollect: { backgroundColor: colors.warningSoft },
+  paymentPaid: { backgroundColor: colors.successSoft },
+  paymentUnknown: { backgroundColor: colors.surfaceMuted },
+  paymentText: { flex: 1, color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
+  paymentTextStrong: { color: colors.text, fontSize: 15, fontWeight: '700' },
   highlighted: { borderColor: colors.primary, borderWidth: 2 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   meta: { color: colors.textMuted, fontSize: 12, fontWeight: '500' },

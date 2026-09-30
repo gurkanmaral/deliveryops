@@ -29,7 +29,7 @@ public sealed class InternalOrdersController(ISender sender, CoreDbContext conte
             request.DeliveryLongitude, request.DeliveryInstructions,
             request.DeliveryLatitude.HasValue ? DeliveryLocationSource.Provider : DeliveryLocationSource.Unknown,
             request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown,
-            request.DeliveryFulfillment), cancellationToken);
+            request.DeliveryFulfillment, request.Payment?.ToInput()), cancellationToken);
         if (result.IsSuccess)
             return Created($"/api/v1/orders/{result.Value!.Id}", new InternalOrderResponse(result.Value.Id, false));
 
@@ -51,7 +51,7 @@ public sealed class InternalOrdersController(ISender sender, CoreDbContext conte
     {
         var result = await sender.Send(new ApplyProviderOrderEventCommand(request.BusinessId,
             request.ExternalOrderId, request.Source, request.ExternalEventId, request.ProviderStatus,
-            request.CancellationReason), cancellationToken);
+            request.CancellationReason, request.Payment?.ToInput()), cancellationToken);
         if (result.IsSuccess)
             return Ok(new InternalProviderEventResponse(result.Value!.OrderId, result.Value.Duplicate,
                 result.Value.Status, result.Value.CreditRefunded, result.Value.Outcome));
@@ -80,9 +80,16 @@ public sealed class InternalOrdersController(ISender sender, CoreDbContext conte
 public sealed record InternalCreateOrderRequest(Guid BusinessId, Guid BranchId, string ExternalId,
     string CustomerName, string CustomerPhone, string DeliveryAddress, OrderSource Source, decimal TotalAmount,
     double? DeliveryLatitude = null, double? DeliveryLongitude = null, string? DeliveryInstructions = null,
-    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier);
+    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier,
+    InternalOrderPayment? Payment = null);
+public sealed record InternalOrderPayment(PaymentMethod Method, bool IsPaid = false, decimal? Amount = null,
+    string? Reference = null, DateTimeOffset? PaidAtUtc = null)
+{
+    public OrderPaymentInput ToInput() => new(Method, IsPaid, Amount, Reference, PaidAtUtc);
+}
 public sealed record InternalOrderResponse(Guid Id, bool Duplicate);
 public sealed record InternalProviderOrderEventRequest(Guid BusinessId, string ExternalOrderId,
-    OrderSource Source, string ExternalEventId, string ProviderStatus, string? CancellationReason);
+    OrderSource Source, string ExternalEventId, string ProviderStatus, string? CancellationReason,
+    InternalOrderPayment? Payment = null);
 public sealed record InternalProviderEventResponse(Guid Id, bool Duplicate, OrderStatus Status,
     bool CreditRefunded, string Outcome);

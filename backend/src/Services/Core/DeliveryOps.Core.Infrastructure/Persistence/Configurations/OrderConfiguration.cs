@@ -22,7 +22,11 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(x => x.DeliveryFailureReason).HasMaxLength(500);
         builder.Property(x => x.CreationIdempotencyKey).HasMaxLength(100).IsRequired();
         builder.Property(x => x.CreationRequestHash).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.PaidAmount).HasPrecision(18, 2);
+        builder.Property(x => x.PaymentReference).HasMaxLength(100);
         builder.Property(x => x.Version).IsRowVersion();
+        builder.Ignore(x => x.RequiresCollectionAtDoor);
+        builder.HasIndex(x => new { x.PaymentCollectedByCourierId, x.PaidAtUtc });
         builder.Ignore(x => x.AllowedNextStatuses);
         builder.HasIndex(x => new { x.BusinessId, x.CreatedAtUtc });
         builder.HasIndex(x => new { x.BusinessId, x.BranchId, x.CreatedAtUtc });

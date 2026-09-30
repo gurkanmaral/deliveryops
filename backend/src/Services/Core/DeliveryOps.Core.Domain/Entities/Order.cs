@@ -67,8 +67,60 @@ public sealed class Order : Entity
     public string? DeliveryFailureReason { get; private set; }
     public string CreationIdempotencyKey { get; private init; } = string.Empty;
     public string CreationRequestHash { get; private init; } = string.Empty;
+    public PaymentMethod PaymentMethod { get; private set; }
+    public PaymentStatus PaymentStatus { get; private set; }
+    public decimal? PaidAmount { get; private set; }
+    public DateTimeOffset? PaidAtUtc { get; private set; }
+    public string? PaymentReference { get; private set; }
+    public PaymentChannel? PaymentChannel { get; private set; }
+    public Guid? PaymentCollectedByCourierId { get; private set; }
+    public double? DeliveredDistanceMeters { get; private set; }
     public uint Version { get; private set; }
     public ICollection<OrderStatusHistory> StatusHistory { get; private set; } = [];
+
+    /// <summary>A delivery order the courier must still collect money for at the door.</summary>
+    public bool RequiresCollectionAtDoor =>
+        PaymentStatus == PaymentStatus.Unpaid && PaymentMethod is PaymentMethod.Cash or PaymentMethod.Card;
+
+    public void SetPaymentMethod(PaymentMethod method)
+    {
+        if (!Enum.IsDefined(method)) throw new ArgumentOutOfRangeException(nameof(method));
+        if (PaymentStatus == PaymentStatus.Paid && method != PaymentMethod)
+            throw new InvalidOperationException("Ödemesi alınmış siparişin ödeme yöntemi değiştirilemez.");
+        PaymentMethod = method;
+        MarkAsUpdated();
+    }
+
+    /// <summary>
+    /// Records that the money was taken. Returns false when the order is already paid (a repeated POS or
+    /// courier confirmation), so callers can treat retries as success without double counting.
+    /// </summary>
+    public bool RecordPayment(PaymentMethod method, decimal amount, PaymentChannel channel, string? reference,
+        DateTimeOffset paidAtUtc, Guid? collectedByCourierId = null)
+    {
+        if (method == PaymentMethod.Unspecified || !Enum.IsDefined(method))
+            throw new ArgumentOutOfRangeException(nameof(method), "Ödeme yöntemi belirtilmelidir.");
+        if (!Enum.IsDefined(channel)) throw new ArgumentOutOfRangeException(nameof(channel));
+        if (amount <= 0 || amount > 100_000_000) throw new ArgumentOutOfRangeException(nameof(amount), "Ödeme tutarı geçersiz.");
+        if (channel == Enums.PaymentChannel.Courier && !collectedByCourierId.HasValue)
+            throw new ArgumentException("Kurye tahsilatında kurye zorunludur.", nameof(collectedByCourierId));
+        if (PaymentStatus == PaymentStatus.Paid) return false;
+        PaymentMethod = method;
+        PaymentStatus = PaymentStatus.Paid;
+        PaidAmount = decimal.Round(amount, 2);
+        PaidAtUtc = paidAtUtc;
+        PaymentReference = NormalizeOptional(reference) is { } value ? value[..Math.Min(value.Length, 100)] : null;
+        PaymentChannel = channel;
+        PaymentCollectedByCourierId = channel == Enums.PaymentChannel.Courier ? collectedByCourierId : null;
+        MarkAsUpdated();
+        return true;
+    }
+
+    public void RecordDeliveryDistance(double meters)
+    {
+        if (!double.IsFinite(meters) || meters < 0) return;
+        DeliveredDistanceMeters = Math.Round(meters, 1);
+    }
     public IReadOnlyList<OrderStatus> AllowedNextStatuses => GetAllowedTransitions(Status);
     public static IReadOnlyList<OrderStatus> GetAllowedTransitions(OrderStatus status) =>
         AllowedTransitions.TryGetValue(status, out OrderStatus[]? values) ? values : [];
@@ -159,6 +211,7 @@ public sealed class Order : Entity
         DeliveryLocationSource = DeliveryLocationSource.Unknown;
         DeliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown;
         CustomerSearchTokens = string.Empty;
+        DeliveredDistanceMeters = null;
         PiiAnonymizedAtUtc = anonymizedAtUtc;
         MarkAsUpdated();
     }

@@ -41,6 +41,30 @@ export enum DeliveryFulfillmentType {
   CustomerPickup,
 }
 
+export enum PaymentMethod {
+  Unspecified,
+  Online,
+  Cash,
+  Card,
+}
+
+export enum PaymentStatus {
+  Unpaid,
+  Paid,
+}
+
+export type CourierShiftSummary = {
+  courierId: string;
+  isOnShift: boolean;
+  shiftStartedAtUtc: string | null;
+  deliveredCount: number;
+  activeOrderCount: number;
+  cashCollected: number;
+  cardCollected: number;
+  collectionCount: number;
+  currency: string;
+};
+
 export type CourierProfile = {
   id: string;
   businessId: string;
@@ -76,6 +100,9 @@ export type Order = {
   cancellationReason: string | null;
   deliveryFailureReason: string | null;
   allowedNextStatuses: OrderStatus[];
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
+  paidAmount?: number | null;
 };
 
 export type AvailableOrder = {

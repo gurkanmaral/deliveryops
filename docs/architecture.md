@@ -87,6 +87,19 @@ Her işletmenin varsayılan düşük bakiye eşiği `100` kredidir; `0` değeri 
 - `POST /api/v1/credits/refunds`: sipariş tüketimini bir kez iade etme
 - `PUT /api/v1/credits/settings`: düşük bakiye eşiği
 
+## Ödemeler
+
+Her siparişin ödeme yöntemi (`Online`, `Cash`, `Card` veya belirtilmemiş) ve ödeme durumu (`Unpaid`/`Paid`) tutulur. Ödeme alındığında tutar, zaman, fiş/onay numarası ve kanal (`Counter` kasa, `Courier` kurye, `Provider` sağlayıcı, `Panel`) kaydedilir. Ödenmiş siparişin ödemesi ikinci kez kaydedilmez; tekrar gelen POS veya kurye onayları başarılı sayılır ama tutarı değiştirmez.
+
+- Windows kasa uygulaması (POS bridge) siparişi `payment` bloğuyla gönderir. Kasada kart/nakit veya online ödenen sipariş panelde doğrudan ödendi olarak oluşur.
+- Ödeme sipariş gönderildikten sonra alınırsa kasa uygulaması `order.paid` olayı gönderir; Integrations bunu Core'a `PAID` sağlayıcı olayı olarak iletir ve sipariş SignalR ile panelde anında ödendi görünür.
+- Kapıda nakit veya kart siparişlerinde kurye `Teslim edildi` durumuna geçtiğinde ödeme kurye tarafından tahsil edilmiş kaydedilir. Kurye uygulaması teslimattan önce tutarı gösterir ve onay ister; vardiya özetinde kasaya teslim edilecek nakit ve kartla tahsil edilen toplam görünür.
+- Panelde `orders.write` yetkisi olan kullanıcı ödemeyi elle "alındı" olarak işaretleyebilir (`POST /api/v1/orders/{id}/payment`).
+
+İşletme menüleri DeliveryOps sunucusunda tutulmaz; yalnızca kasa bilgisayarında saklanır. Sipariş notuna ürün özeti yazılır.
+
+Kurye teslim ettim dediğinde güncel konumu biliniyorsa teslimat adresine uzaklığı siparişe yazılır; panel 300 m üzerindeki teslimatları uyarı olarak gösterir. Sağlayıcı, kurye paketi teslim aldıktan sonra siparişi iptal ederse sipariş iptal edilemez; olay tekrar denenmez ve operatörler için kritik alarm oluşturulur.
+
 ## Veri sahipliği
 
 Her servis kendi şemasının ve verisinin sahibidir. Servisler arası durum değişiklikleri RabbitMQ üzerinden idempotent entegrasyon olaylarıyla aktarılacaktır. Dashboard sorguları başlangıçta Core veritabanından, ölçek ihtiyacında ayrı bir okuma modelinden beslenecektir.

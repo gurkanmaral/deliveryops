@@ -55,7 +55,8 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
             DeliveryLatitude: request.DeliveryLatitude, DeliveryLongitude: request.DeliveryLongitude,
             DeliveryInstructions: request.DeliveryInstructions,
             DeliveryLocationSource: request.DeliveryLatitude.HasValue ? DeliveryLocationSource.MapPin : DeliveryLocationSource.Unknown,
-            DeliveryLocationAccuracy: request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown), cancellationToken);
+            DeliveryLocationAccuracy: request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown,
+            Payment: PaymentInput(request.PaymentMethod, request.IsPaid)), cancellationToken);
         return result.IsSuccess ? Created($"/api/v1/orders/{result.Value!.Id}", result.Value) : FromResult(result);
     }
 
@@ -70,7 +71,8 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
             idempotencyKey, DeliveryLatitude: request.DeliveryLatitude, DeliveryLongitude: request.DeliveryLongitude,
             DeliveryInstructions: request.DeliveryInstructions,
             DeliveryLocationSource: request.DeliveryLatitude.HasValue ? DeliveryLocationSource.MapPin : DeliveryLocationSource.Unknown,
-            DeliveryLocationAccuracy: request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown), cancellationToken);
+            DeliveryLocationAccuracy: request.DeliveryLatitude.HasValue ? DeliveryLocationAccuracy.Exact : DeliveryLocationAccuracy.Unknown,
+            Payment: PaymentInput(request.PaymentMethod, request.IsPaid)), cancellationToken);
         return result.IsSuccess ? Created($"/api/v1/orders/{result.Value!.Id}", result.Value) : FromResult(result);
     }
 
@@ -103,6 +105,13 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
     public async Task<ActionResult<OrderResponse>> DeliveryFailure(Guid id, DeliveryFailureRequest request, CancellationToken cancellationToken) =>
         FromResult(await sender.Send(new ReportDeliveryFailureCommand(id, request.Reason), cancellationToken));
 
+    [HttpPost("{id:guid}/payment")]
+    [Authorize(Policy = Permissions.OrdersWrite)]
+    public async Task<ActionResult<OrderResponse>> RecordPayment(Guid id, RecordPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        FromResult(await sender.Send(new RecordOrderPaymentCommand(id, request.Method, request.Amount,
+            request.Reference), cancellationToken));
+
     [HttpPost("{id:guid}/cancel")]
     [Authorize(Policy = Permissions.OrdersWrite)]
     public async Task<ActionResult<OrderResponse>> Cancel(Guid id, CancelOrderRequest request, CancellationToken cancellationToken) =>
@@ -112,14 +121,18 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
     [Authorize(Policy = Permissions.OrdersWrite)]
     public async Task<ActionResult<OrderResponse>> Cancel(Guid id, CancellationToken cancellationToken) =>
         FromResult(await sender.Send(new CancelOrderCommand(id, null), cancellationToken));
+
+    private static OrderPaymentInput? PaymentInput(PaymentMethod method, bool isPaid) =>
+        method == PaymentMethod.Unspecified && !isPaid ? null : new OrderPaymentInput(method, isPaid);
 }
 
 public sealed record CreateOrderRequest(Guid BusinessId, Guid BranchId, string? ExternalId, string CustomerName, string CustomerPhone,
     string DeliveryAddress, decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
-    string? DeliveryInstructions = null);
+    string? DeliveryInstructions = null, PaymentMethod PaymentMethod = PaymentMethod.Unspecified, bool IsPaid = false);
 public sealed record CreatePhoneOrderRequest(Guid BusinessId, Guid BranchId, string CustomerName, string CustomerPhone,
     string DeliveryAddress, decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
-    string? DeliveryInstructions = null);
+    string? DeliveryInstructions = null, PaymentMethod PaymentMethod = PaymentMethod.Unspecified, bool IsPaid = false);
+public sealed record RecordPaymentRequest(PaymentMethod Method, decimal? Amount = null, string? Reference = null);
 public sealed record UpdateOrderRequest(string CustomerName, string CustomerPhone, string DeliveryAddress,
     decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
     string? DeliveryInstructions = null);

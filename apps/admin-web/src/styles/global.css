@@ -262,6 +262,8 @@ tbody tr { transition: background-color .12s ease; }
 tbody tr:hover { background: #fcfbf9; }
 .table-select { min-width: 130px; height: 30px; padding: 0 8px; font-size: 12.5px; }
 .cell-sub { margin-top: 2px; display: block; max-width: 280px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; }
+.cell-warning { color: #b45309; font-weight: 600; white-space: normal; }
+.payment-cell { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .truncate-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .table-actions { display: flex; gap: 6px; }
 .table-actions button { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }

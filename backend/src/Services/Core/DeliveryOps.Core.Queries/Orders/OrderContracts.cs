@@ -30,7 +30,14 @@ public sealed record OrderResponse(
     string? DeliveryInstructions = null,
     DeliveryLocationSource DeliveryLocationSource = DeliveryLocationSource.Unknown,
     DeliveryLocationAccuracy DeliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown,
-    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier);
+    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier,
+    PaymentMethod PaymentMethod = PaymentMethod.Unspecified,
+    PaymentStatus PaymentStatus = PaymentStatus.Unpaid,
+    decimal? PaidAmount = null,
+    DateTimeOffset? PaidAtUtc = null,
+    string? PaymentReference = null,
+    PaymentChannel? PaymentChannel = null,
+    double? DeliveredDistanceMeters = null);
 
 public sealed record AvailableOrderResponse(
     Guid Id,
@@ -78,7 +85,18 @@ public sealed record CreateOrderCommand(
     string? DeliveryInstructions = null,
     DeliveryLocationSource DeliveryLocationSource = DeliveryLocationSource.Unknown,
     DeliveryLocationAccuracy DeliveryLocationAccuracy = DeliveryLocationAccuracy.Unknown,
-    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier) : IRequest<Result<OrderResponse>>;
+    DeliveryFulfillmentType DeliveryFulfillment = DeliveryFulfillmentType.MerchantCourier,
+    OrderPaymentInput? Payment = null) : IRequest<Result<OrderResponse>>;
+
+/// <summary>Payment details supplied with an order or reported afterwards by a POS, courier or operator.</summary>
+public sealed record OrderPaymentInput(PaymentMethod Method, bool IsPaid = false, decimal? Amount = null,
+    string? Reference = null, DateTimeOffset? PaidAtUtc = null);
+public sealed record RecordOrderPaymentCommand(Guid Id, PaymentMethod Method, decimal? Amount, string? Reference)
+    : IRequest<Result<OrderResponse>>;
+public sealed record GetCourierShiftSummaryQuery : IRequest<Result<CourierShiftSummaryResponse>>;
+public sealed record CourierShiftSummaryResponse(Guid CourierId, bool IsOnShift, DateTimeOffset? ShiftStartedAtUtc,
+    int DeliveredCount, int ActiveOrderCount, decimal CashCollected, decimal CardCollected, int CollectionCount,
+    string Currency);
 public sealed record UpdateOrderCommand(Guid Id, string CustomerName, string CustomerPhone, string DeliveryAddress,
     decimal TotalAmount, double? DeliveryLatitude = null, double? DeliveryLongitude = null,
     string? DeliveryInstructions = null,
@@ -92,7 +110,8 @@ public sealed record ChangeOrderStatusCommand(Guid Id, OrderStatus Status) : IRe
 public sealed record CancelOrderCommand(Guid Id, string? Reason) : IRequest<Result<OrderResponse>>;
 public sealed record ReportDeliveryFailureCommand(Guid Id, string Reason) : IRequest<Result<OrderResponse>>;
 public sealed record ApplyProviderOrderEventCommand(Guid BusinessId, string ExternalOrderId,
-    OrderSource Source, string ExternalEventId, string ProviderStatus, string? CancellationReason)
+    OrderSource Source, string ExternalEventId, string ProviderStatus, string? CancellationReason,
+    OrderPaymentInput? Payment = null)
     : IRequest<Result<ProviderOrderEventResponse>>;
 public sealed record ProviderOrderEventResponse(Guid OrderId, OrderStatus Status, bool Duplicate,
     bool CreditRefunded, string Outcome);

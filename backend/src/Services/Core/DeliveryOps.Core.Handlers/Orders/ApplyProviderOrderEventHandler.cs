@@ -3,14 +3,16 @@ using DeliveryOps.Core.Domain.Entities;
 using DeliveryOps.Core.Domain.Enums;
 using DeliveryOps.Core.Handlers.Common;
 using DeliveryOps.Core.Queries.Abstractions;
+using DeliveryOps.Core.Queries.Operations;
 using DeliveryOps.Core.Queries.Orders;
+using DeliveryOps.Core.Handlers.Operations;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 namespace DeliveryOps.Core.Handlers.Orders;
 
 public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequestContext requestContext,
-    IOrderOperationsNotifier notifier)
+    IOrderOperationsNotifier notifier, IOperationalAlertNotifier alertNotifier)
     : IRequestHandler<ApplyProviderOrderEventCommand, Result<ProviderOrderEventResponse>>
 {
     public async Task<Result<ProviderOrderEventResponse>> Handle(ApplyProviderOrderEventCommand request,
@@ -48,6 +50,7 @@ public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequ
                 "DISPATCHED" => ApplyDispatched(order, requestContext.UserId),
                 "DELIVERED" => ApplyDelivered(order, requestContext.UserId),
                 "CANCELLED" => ApplyCancelled(order, request.CancellationReason, requestContext.UserId),
+                "PAID" => ApplyPaid(order, request.Payment),
                 _ => throw new ArgumentException($"Desteklenmeyen sağlayıcı durumu: {providerStatus}.")
             };
         }
@@ -62,6 +65,10 @@ public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequ
 
         if (changed)
             context.OrderStatusHistory.AddRange(order.StatusHistory);
+
+        OperationalAlert? cancellationAlert = null;
+        if (outcome == CancelledAfterPickupOutcome)
+            cancellationAlert = await RaiseCancelledAfterPickupAlertAsync(order, request.CancellationReason, cancellationToken);
 
         if (changed && providerStatus == "CANCELLED")
         {
@@ -86,6 +93,8 @@ public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequ
         }
 
         if (changed) await notifier.OrderChangedAsync(OrderMapper.Map(order), cancellationToken);
+        if (cancellationAlert is not null)
+            await alertNotifier.AlertChangedAsync(OperationalAlertMapper.Map(cancellationAlert), cancellationToken);
         return Result<ProviderOrderEventResponse>.Success(new(order.Id, order.Status, false,
             creditRefunded, outcome));
     }
@@ -170,10 +179,44 @@ public sealed class ApplyProviderOrderEventHandler(ICoreDbContext context, IRequ
         throw new InvalidOperationException($"DELIVERED olayı {order.Status} durumundaki siparişe henüz uygulanamaz.");
     }
 
+    private const string CancelledAfterPickupOutcome = "CancelledAfterPickup";
+
+    private static (string Outcome, bool Changed) ApplyPaid(Order order, OrderPaymentInput? payment)
+    {
+        if (payment is null || payment.Method == PaymentMethod.Unspecified)
+            throw new ArgumentException("Ödeme olayında ödeme yöntemi zorunludur.");
+        if (order.PaymentStatus == PaymentStatus.Paid) return ("AlreadyApplied", false);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (payment.PaidAtUtc > now.AddMinutes(5)) throw new ArgumentException("Ödeme zamanı gelecekte olamaz.");
+        bool recorded = order.RecordPayment(payment.Method, payment.Amount ?? order.TotalAmount,
+            payment.Method == PaymentMethod.Online ? PaymentChannel.Provider : PaymentChannel.Counter,
+            payment.Reference, payment.PaidAtUtc ?? now);
+        return recorded ? ("Applied", true) : ("AlreadyApplied", false);
+    }
+
+    // The courier already has the package, so the order cannot simply be cancelled; an operator has to call
+    // the customer/courier. Acknowledge the event (so it is not retried into the dead-letter queue) and alert.
+    private async Task<OperationalAlert?> RaiseCancelledAfterPickupAlertAsync(Order order, string? reason,
+        CancellationToken cancellationToken)
+    {
+        string key = $"order:{order.Id}:{OperationalAlertType.ProviderCancelledAfterPickup}";
+        if (await context.OperationalAlerts.AnyAsync(x => x.AlertKey == key, cancellationToken)) return null;
+        string detail = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Neden: {reason.Trim()}";
+        string message = $"#{order.Id.ToString()[..8]} numaralı sipariş kurye paketi teslim aldıktan sonra sağlayıcı tarafından iptal edildi.{detail}";
+        OperationalAlert alert = OperationalAlert.Create(order.BusinessId, order.Id, order.CourierId, key,
+            OperationalAlertType.ProviderCancelledAfterPickup, OperationalAlertSeverity.Critical,
+            "Teslim alınan sipariş sağlayıcıda iptal edildi", message[..Math.Min(message.Length, 500)],
+            DateTimeOffset.UtcNow);
+        context.OperationalAlerts.Add(alert);
+        return alert;
+    }
+
     private static (string Outcome, bool Changed) ApplyCancelled(Order order, string? reason, Guid userId)
     {
         if (order.Status == OrderStatus.Cancelled) return ("AlreadyApplied", false);
         if (order.Status is OrderStatus.Delivered or OrderStatus.Returned) return ("IgnoredTerminal", false);
+        if (order.Status is OrderStatus.PickedUp or OrderStatus.OnTheWay or OrderStatus.DeliveryFailed)
+            return (CancelledAfterPickupOutcome, false);
         order.Cancel(string.IsNullOrWhiteSpace(reason) ? "Sağlayıcı tarafından iptal edildi." : reason, userId);
         return ("Applied", true);
     }

@@ -20,6 +20,27 @@ Windows işletme bilgisayarında çalışan POS sipariş köprüsü. POS yazıl�
 
 Secret düz metin olarak diske yazılmaz; Windows DPAPI `CurrentUser` kapsamıyla şifrelenir. Ayar dosyası `%LOCALAPPDATA%\DeliveryOps\PosBridge\settings.json` konumundadır.
 
+## Kasa ve menü
+
+Uygulama üç sekmeden oluşur:
+
+- **Kasa:** menüden ürün seçilir, müşteri ve ödeme şekli girilir, sipariş DeliveryOps'a gönderilir. Ürün özeti ("2x Lahmacun, 1x Ayran") siparişin notuna yazılır; kurye ve mutfak bunu görür.
+- **Menü:** işletme kategori, ürün, fiyat ve "satışta" durumunu yönetir. Menü yalnızca bu bilgisayarda `%LOCALAPPDATA%\DeliveryOps\PosBridge\menu.json` dosyasında tutulur, DeliveryOps sunucusuna gönderilmez.
+- **Bağlantı:** webhook ayarları ve işlem günlüğü.
+
+Ödeme seçenekleri:
+
+| Seçenek | Panelde |
+|---|---|
+| Kasada kart (NarPOS) / Kasada nakit / Online ödendi | Sipariş **ödendi** olarak oluşur |
+| Kapıda nakit / Kapıda kart | Sipariş ödenmemiş oluşur; kurye teslim ettiğinde tahsil edilmiş sayılır |
+
+Ödeme sipariş gönderildikten sonra alınırsa (ör. müşteri kasada NarPOS cihazıyla sonradan ödedi) **Son siparişler** listesindeki *Nakit alındı* / *Kart alındı* düğmesi `order.paid` olayı gönderir ve sipariş panelde anında ödendi görünür. NarPOS fiş veya onay numarası isteğe bağlı olarak girilebilir.
+
+NarPOS cihazının sonucu uygulamaya otomatik bildirmesi için `IPaymentTerminal` arayüzü hazırdır; NarPOS entegrasyon dokümanı ve test ortamı sağlandığında bu arayüzü uygulayan bir adaptör eklenecektir. O zamana kadar ödeme cihazda tamamlanır ve kasiyer uygulamada onaylar (`ManualPaymentTerminal`).
+
+İnternet kesikken gönderilen siparişler ve ödemeler kaybolmaz: izlenen klasöre yazılır ve bağlantı gelince sırayla (önce sipariş, sonra ödeme) gönderilir. Son siparişler listesi müşteri bilgisi içerdiği için 2 gün sonra yerel dosyadan silinir.
+
 ## POS dosya sözleşmesi
 
 POS entegrasyonu izlenen klasöre şu yapıda UTF-8 `.json` dosyası bırakmalıdır:
@@ -33,6 +54,14 @@ POS entegrasyonu izlenen klasöre şu yapıda UTF-8 `.json` dosyası bırakmalı
   "totalAmount": 245.50
 }
 ```
+
+İsteğe bağlı alanlar: `eventId`, `eventType` (`order.created` veya `order.paid`), `deliveryInstructions`, `deliveryFulfillment` (0 işletme kuryesi, 2 gel-al) ve ödeme bloğu:
+
+```json
+"payment": { "method": "card", "status": "paid", "amount": 245.50, "reference": "NARPOS-000123" }
+```
+
+`method` `cash`, `card` veya `online`; `status` `paid` veya `unpaid` olabilir. Sonradan alınan ödeme için aynı sipariş `eventType: "order.paid"` ve farklı bir `eventId` (ör. `POS-2026-0001:paid`) ile gönderilir.
 
 POS yazılımının önce `.tmp` dosyasına yazıp işlem tamamlandığında uzantıyı `.json` olarak değiştirmesi önerilir. Bridge, hâlâ kilitli olan dosyaları sonraki çevrime bırakır.
 

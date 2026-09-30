@@ -22,6 +22,13 @@ public sealed class InternalNotificationsController(NotificationsDbContext datab
         query = request.CourierId.HasValue
             ? query.Where(x => x.CourierId == request.CourierId)
             : query.Where(x => !request.BranchId.HasValue || x.BranchId == null || x.BranchId == request.BranchId);
+        // Core sends the couriers who can claim the package right now (on shift, available); an older Core
+        // that does not send the list keeps the previous business/branch-wide behaviour.
+        if (!request.CourierId.HasValue && request.EligibleCourierIds is { } eligible)
+        {
+            Guid[] eligibleIds = eligible.ToArray();
+            query = query.Where(x => eligibleIds.Contains(x.CourierId));
+        }
         List<PushDevice> devices = await query.ToListAsync(cancellationToken);
 
         string title = request.CourierId.HasValue ? "Yeni paket atandı" : "Paket havuzda";
@@ -45,4 +52,4 @@ public sealed class InternalNotificationsController(NotificationsDbContext datab
 }
 
 public sealed record OrderNotificationRequest(Guid EventId, string EventType, Guid OrderId, Guid BusinessId,
-    Guid? BranchId, Guid? CourierId);
+    Guid? BranchId, Guid? CourierId, IReadOnlyList<Guid>? EligibleCourierIds = null);

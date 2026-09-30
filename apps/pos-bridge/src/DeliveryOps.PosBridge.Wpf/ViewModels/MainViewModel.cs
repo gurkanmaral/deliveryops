@@ -17,10 +17,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _pollIntervalSeconds = "5", _validationMessage = string.Empty, _lastCycleText = "Henüz kontrol edilmedi";
     private bool _isRunning;
 
-    public MainViewModel(BridgeSettingsStore settingsStore, PosBridgeProcessor processor)
+    public MainViewModel(BridgeSettingsStore settingsStore, PosBridgeProcessor processor, MenuViewModel menu,
+        Func<Func<BridgeRuntimeSettings?>, CashierViewModel> createCashier)
     {
         _settingsStore = settingsStore;
         _processor = processor;
+        Menu = menu;
+        Cashier = createCashier(CurrentSettings);
+        Menu.MenuChanged += Cashier.ApplyMenu;
         _processor.LogReceived += (_, entry) => Application.Current.Dispatcher.Invoke(() =>
         {
             Logs.Insert(0, entry);
@@ -33,6 +37,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public MenuViewModel Menu { get; }
+    public CashierViewModel Cashier { get; }
     public ObservableCollection<BridgeLogEntry> Logs { get; } = [];
     public AsyncRelayCommand SaveCommand { get; }
     public AsyncRelayCommand StartCommand { get; }
@@ -54,6 +60,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         BridgeRuntimeSettings settings = await _settingsStore.LoadAsync();
         WebhookUrl = settings.WebhookUrl; Secret = settings.Secret; InboxDirectory = settings.InboxDirectory;
         PollIntervalSeconds = settings.PollIntervalSeconds.ToString();
+        await Menu.LoadAsync();
+        await Cashier.LoadOrdersAsync();
+        // Orders queued while offline are only delivered by the folder processor, so keep it running.
+        if (CurrentSettings() is not null && StartCommand.CanExecute(null)) StartCommand.Execute(null);
+    }
+
+    /// <summary>The saved connection settings, or null when they are incomplete.</summary>
+    private BridgeRuntimeSettings? CurrentSettings()
+    {
+        int interval = int.TryParse(PollIntervalSeconds, out int parsed) ? parsed : 0;
+        BridgeRuntimeSettings settings = new(WebhookUrl.Trim(), Secret.Trim(), InboxDirectory.Trim(), interval);
+        return settings.Validate().Count == 0 ? settings : null;
     }
 
     public async Task StopAsync()
