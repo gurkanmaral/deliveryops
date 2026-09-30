@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace DeliveryOps.Integrations.Api.Services;
 
 public sealed class OutboundEventProcessor(IntegrationsDbContext context,
-    YemeksepetiPartnerClient yemeksepetiClient, TimeProvider timeProvider,
+    YemeksepetiPartnerClient yemeksepetiClient, GetirFoodClient getirClient, TimeProvider timeProvider,
     ILogger<OutboundEventProcessor> logger)
 {
     private const int MaxAttempts = 5;
@@ -26,6 +26,14 @@ public sealed class OutboundEventProcessor(IntegrationsDbContext context,
         try
         {
             if (!item.Connection.IsActive) throw new InvalidOperationException("Entegrasyon bağlantısı pasif.");
+            if (item.Connection.Provider == IntegrationProvider.Getir)
+            {
+                await ApplyGetirStatusAsync(item, cancellationToken);
+                item.Complete(timeProvider.GetUtcNow());
+                await context.SaveChangesAsync(CancellationToken.None);
+                await transaction.CommitAsync(CancellationToken.None);
+                return;
+            }
             // An order accumulates several inbound events (re-sent RECEIVED webhooks, provider lifecycle
             // updates), all linked to the same core order; use the most recent full payload.
             InboundOrderEvent inbound = await context.InboundOrderEvents.AsNoTracking()
@@ -45,5 +53,35 @@ public sealed class OutboundEventProcessor(IntegrationsDbContext context,
         }
         await context.SaveChangesAsync(CancellationToken.None);
         await transaction.CommitAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Getir requires prepare before handover/deliver (and at least a minute between steps). Prepare is
+    /// repeated first so a skipped "ready" step does not block the final call; too-early calls fail and
+    /// are retried with backoff until Getir accepts them.
+    /// </summary>
+    private async Task ApplyGetirStatusAsync(OutboundOrderEvent item, CancellationToken cancellationToken)
+    {
+        if (!item.Connection.CredentialsConfigured)
+        {
+            // Same rule as inbound verify: without Getir keys (e.g. simulator connections) there is nothing to call.
+            logger.LogWarning("Getir {Status} for order {OrderId} not sent: connection {ConnectionId} has no Getir keys.",
+                item.ProviderStatus, item.ExternalOrderId, item.ConnectionId);
+            return;
+        }
+        try
+        {
+            await getirClient.PrepareAsync(item.Connection, item.ExternalOrderId, cancellationToken);
+            if (item.ProviderStatus == Controllers.GetirStatuses.Handover)
+                await getirClient.HandoverAsync(item.Connection, item.ExternalOrderId, cancellationToken);
+            else if (item.ProviderStatus == Controllers.GetirStatuses.Deliver)
+                await getirClient.DeliverAsync(item.Connection, item.ExternalOrderId, cancellationToken);
+        }
+        catch (GetirOrderCancelledException exception)
+        {
+            // Nothing left to report for an order Getir already cancelled.
+            logger.LogInformation(exception, "Skipping Getir {Status} for cancelled order {OrderId}.",
+                item.ProviderStatus, item.ExternalOrderId);
+        }
     }
 }

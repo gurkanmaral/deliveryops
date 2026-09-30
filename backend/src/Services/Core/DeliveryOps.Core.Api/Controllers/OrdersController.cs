@@ -105,6 +105,11 @@ public sealed class OrdersController(ISender sender) : ApiControllerBase
     public async Task<ActionResult<OrderResponse>> DeliveryFailure(Guid id, DeliveryFailureRequest request, CancellationToken cancellationToken) =>
         FromResult(await sender.Send(new ReportDeliveryFailureCommand(id, request.Reason), cancellationToken));
 
+    [HttpPost("{id:guid}/handover")]
+    [Authorize(Policy = Permissions.OrdersTransition)]
+    public async Task<ActionResult<OrderResponse>> CompleteHandover(Guid id, CancellationToken cancellationToken) =>
+        FromResult(await sender.Send(new CompleteOrderHandoverCommand(id), cancellationToken));
+
     [HttpPost("{id:guid}/payment")]
     [Authorize(Policy = Permissions.OrdersWrite)]
     public async Task<ActionResult<OrderResponse>> RecordPayment(Guid id, RecordPaymentRequest request,

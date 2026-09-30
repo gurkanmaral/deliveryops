@@ -70,8 +70,11 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options, IRequ
         List<EntityEntry<Order>> orders = ChangeTracker.Entries<Order>().Where(x =>
             x.State is EntityState.Added or EntityState.Modified &&
             (x.State == EntityState.Added || x.Property(nameof(Order.Status)).IsModified) &&
-            x.Entity.Source == OrderSource.Yemeksepeti &&
-            x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.PickedUp or OrderStatus.Cancelled).ToList();
+            (x.Entity.Source == OrderSource.Yemeksepeti &&
+             x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.PickedUp or OrderStatus.Cancelled ||
+             // Getir: ready → prepare; delivered → handover (Getir courier) or deliver (own courier).
+             x.Entity.Source == OrderSource.Getir &&
+             x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.Delivered)).ToList();
         foreach (EntityEntry<Order> entry in orders)
             IntegrationOutbox.Add(IntegrationOutboxMessage.CreateForOrder(entry.Entity));
     }

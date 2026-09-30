@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DeliveryOps.Integrations.Api.Services;
 
 public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrdersClient coreOrdersClient,
-    TimeProvider timeProvider, ILogger<InboundEventProcessor> logger)
+    GetirFoodClient getirFoodClient, TimeProvider timeProvider, ILogger<InboundEventProcessor> logger)
 {
     private const int MaxAttempts = 5;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -51,6 +51,7 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
             else
             {
                 result = await coreOrdersClient.CreateAsync(inboundEvent.Connection, order, cancellationToken);
+                await AcceptOnProviderAsync(inboundEvent, cancellationToken);
             }
             inboundEvent.Complete(result.Id, timeProvider.GetUtcNow());
         }
@@ -75,10 +76,64 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
         _ => null
     };
 
+    /// <summary>
+    /// Getir requires every order to be answered within 30 seconds (otherwise the restaurant is called, and
+    /// after 5 minutes it is closed and its orders cancelled), so a Getir order is verified as soon as it
+    /// exists in DeliveryOps. A failure fails the event; the retry finds the order already created and only
+    /// repeats the verification.
+    /// </summary>
+    private async Task AcceptOnProviderAsync(InboundOrderEvent inboundEvent, CancellationToken cancellationToken)
+    {
+        IntegrationConnection connection = inboundEvent.Connection;
+        if (connection.Provider != IntegrationProvider.Getir) return;
+        if (!connection.CredentialsConfigured)
+        {
+            logger.LogWarning("Getir order {OrderId} could not be verified: connection {ConnectionId} has no Getir keys.",
+                inboundEvent.ExternalOrderId, connection.Id);
+            return;
+        }
+        (bool scheduled, int? status) = ReadGetirSchedule(inboundEvent.RawPayload);
+        // 325 = scheduled order awaiting approval; 400 = immediate or already pre-approved scheduled order.
+        bool useScheduledVerify = scheduled && status == 325;
+        try
+        {
+            await getirFoodClient.VerifyAsync(connection, inboundEvent.ExternalOrderId, useScheduledVerify,
+                cancellationToken);
+        }
+        catch (GetirOrderCancelledException)
+        {
+            logger.LogInformation("Getir order {OrderId} was cancelled before it could be verified.",
+                inboundEvent.ExternalOrderId);
+        }
+    }
+
+    private static (bool Scheduled, int? Status) ReadGetirSchedule(string rawPayload)
+    {
+        using JsonDocument document = JsonDocument.Parse(rawPayload);
+        JsonElement root = document.RootElement;
+        if (root.TryGetProperty("foodOrder", out JsonElement wrapped) && wrapped.ValueKind == JsonValueKind.Object)
+            root = wrapped;
+        bool scheduled = root.TryGetProperty("isScheduled", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
+        int? status = root.TryGetProperty("status", out JsonElement value) && value.TryGetInt32(out int parsed)
+            ? parsed : null;
+        return (scheduled, status);
+    }
+
     private static string? ReadCancellationReason(string rawPayload)
     {
         using JsonDocument document = JsonDocument.Parse(rawPayload);
         JsonElement root = document.RootElement;
+        if (root.TryGetProperty("foodOrder", out JsonElement getirOrder) && getirOrder.ValueKind == JsonValueKind.Object)
+            root = getirOrder;
+        // Getir: cancelReason.messages.tr, then the free-text cancelNote.
+        if (root.TryGetProperty("cancelReason", out JsonElement getirReason) && getirReason.ValueKind == JsonValueKind.Object &&
+            getirReason.TryGetProperty("messages", out JsonElement messages) && messages.ValueKind == JsonValueKind.Object &&
+            messages.TryGetProperty("tr", out JsonElement turkish) && turkish.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(turkish.GetString()))
+            return turkish.GetString()!.Trim();
+        if (root.TryGetProperty("cancelNote", out JsonElement note) && note.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(note.GetString()))
+            return note.GetString()!.Trim();
         JsonElement cancellation;
         if ((!root.TryGetProperty("cancellation", out cancellation) || cancellation.ValueKind != JsonValueKind.Object) &&
             (!root.TryGetProperty("cancelInfo", out cancellation) || cancellation.ValueKind != JsonValueKind.Object))

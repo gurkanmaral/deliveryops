@@ -17,7 +17,7 @@ namespace DeliveryOps.Integrations.Api.Controllers;
 [Authorize]
 public sealed class IntegrationConnectionsController(IntegrationsDbContext context, CoreOrdersClient coreOrdersClient,
     WebhookSecretProtector secretProtector, ProviderAdapterRegistry adapterRegistry,
-    YemeksepetiPartnerClient yemeksepetiPartnerClient,
+    YemeksepetiPartnerClient yemeksepetiPartnerClient, GetirFoodClient getirFoodClient,
     IntegrationConnectionHealthChecker healthChecker, TimeProvider timeProvider,
     IOptions<IntegrationSecurityOptions> securityOptions,
     ILogger<IntegrationConnectionsController> logger) : ControllerBase
@@ -117,6 +117,42 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         return Ok(Map(connection));
     }
 
+    [HttpPut("{id:guid}/getir-credentials")]
+    [Authorize(Policy = Permissions.IntegrationsWrite)]
+    public async Task<ActionResult<IntegrationConnectionResponse>> ConfigureGetir(Guid id,
+        ConfigureGetirRequest request, CancellationToken cancellationToken)
+    {
+        IntegrationConnection? connection = await context.Connections.FindAsync([id], cancellationToken);
+        if (connection is null) return NotFound();
+        if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
+        if (connection.Provider != IntegrationProvider.Getir)
+            return BadRequest(new ProblemDetails { Title = "Bu bağlantı Getir bağlantısı değil.", Status = 400 });
+        if (string.IsNullOrWhiteSpace(request.AppSecretKey) || string.IsNullOrWhiteSpace(request.RestaurantSecretKey))
+            return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]>
+                { ["credentials"] = ["App secret key ve restaurant secret key zorunludur."] }));
+        GetirCredentials credentials = new(request.AppSecretKey.Trim(), request.RestaurantSecretKey.Trim());
+        GetirLoginResult login;
+        // Log in before saving: it proves the keys work and returns the Getir restaurant they belong to.
+        try { login = await getirFoodClient.LoginAsync(request.Environment, credentials, cancellationToken); }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            logger.LogWarning(exception, "Getir login failed while configuring connection {ConnectionId}.", id);
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Getir anahtarları doğrulanamadı.",
+                Detail = exception is HttpRequestException { StatusCode: not null }
+                    ? "Getir anahtarları kabul etmedi. Ortamı (test/canlı) ve anahtarları kontrol edin."
+                    : "Getir servisine ulaşılamadı. Daha sonra tekrar deneyin.",
+                Status = 400
+            });
+        }
+        string protectedCredentials = secretProtector.Protect(JsonSerializer.Serialize(credentials));
+        connection.ConfigureProvider(login.RestaurantId, protectedCredentials, request.Environment);
+        getirFoodClient.Invalidate(connection.Id);
+        await context.SaveChangesAsync(cancellationToken);
+        return Ok(Map(connection));
+    }
+
     [HttpPost("{id:guid}/test")]
     [Authorize(Policy = Permissions.IntegrationsWrite)]
     public async Task<ActionResult<IntegrationConnectionTestResponse>> TestConnection(Guid id,
@@ -125,10 +161,11 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         IntegrationConnection? connection = await context.Connections.FindAsync([id], cancellationToken);
         if (connection is null) return NotFound();
         if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
-        if (connection.Provider != IntegrationProvider.Yemeksepeti)
+        if (connection.Provider is not (IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir))
             return BadRequest(new ProblemDetails { Title = "Bu bağlantı için bağlantı testi desteklenmiyor.", Status = 400 });
         if (!connection.CredentialsConfigured)
-            return BadRequest(new ProblemDetails { Title = "Önce Yemeksepeti OAuth bilgilerini kaydedin.", Status = 400 });
+            return BadRequest(new ProblemDetails { Title = connection.Provider == IntegrationProvider.Getir
+                ? "Önce Getir anahtarlarını kaydedin." : "Önce Yemeksepeti OAuth bilgilerini kaydedin.", Status = 400 });
 
         IntegrationConnectionHealthResult result = await healthChecker.CheckAsync(
             connection, automatic: false, cancellationToken);
@@ -182,7 +219,7 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
         connection.SetActive(request.IsActive);
         await context.SaveChangesAsync(cancellationToken);
-        if (!request.IsActive && connection.Provider == IntegrationProvider.Yemeksepeti)
+        if (!request.IsActive && connection.Provider is IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir)
         {
             try
             {
@@ -291,6 +328,8 @@ public sealed record InboundEventResponse(Guid Id, Guid ConnectionId, string Ext
     DateTimeOffset? NextAttemptAtUtc, DateTimeOffset? ProcessedAtUtc);
 public sealed record ConfigureYemeksepetiRequest(string ClientId, string ClientSecret,
     string ChainId, ProviderEnvironment Environment = ProviderEnvironment.Sandbox);
+public sealed record ConfigureGetirRequest(string AppSecretKey, string RestaurantSecretKey,
+    ProviderEnvironment Environment = ProviderEnvironment.Sandbox);
 public sealed record OutboundEventResponse(Guid Id, Guid ConnectionId, Guid CoreOrderId,
     string ExternalOrderId, string ProviderStatus, OutboundEventStatus Status, int Attempts,
     string? LastError, DateTimeOffset CreatedAtUtc, DateTimeOffset? NextAttemptAtUtc,
