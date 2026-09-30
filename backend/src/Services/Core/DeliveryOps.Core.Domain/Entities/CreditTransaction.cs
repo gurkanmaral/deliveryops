@@ -20,7 +20,8 @@ public sealed class CreditTransaction : Entity
         int balanceAfter, Guid? orderId, string description, Guid createdByUserId,
         string? idempotencyKey = null)
     {
-        if (businessId == Guid.Empty || amount == 0 || balanceAfter < 0)
+        if (businessId == Guid.Empty || amount == 0 ||
+            balanceAfter < -BusinessCreditAccount.IntegrationOverdraftLimit)
             throw new ArgumentException("Credit transaction is invalid.");
         if (type == CreditTransactionType.OrderConsumption && (!orderId.HasValue || amount >= 0))
             throw new ArgumentException("Order consumption requires an order and a negative amount.");

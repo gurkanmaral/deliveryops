@@ -194,13 +194,16 @@ public sealed class OperationalAlertWorker(IServiceScopeFactory scopeFactory, Ti
             .SingleOrDefaultAsync(x => x.BusinessId == businessId, cancellationToken);
         if (account is null || account.LowBalanceThreshold == 0 || account.Balance > account.LowBalanceThreshold)
             return null;
-        OperationalAlertSeverity severity = account.Balance == 0
+        OperationalAlertSeverity severity = account.Balance <= 0
             ? OperationalAlertSeverity.Critical
             : OperationalAlertSeverity.Warning;
         return new AlertCandidate($"business:{businessId}:{OperationalAlertType.LowCreditBalance}",
             OperationalAlertType.LowCreditBalance, severity, null, null,
-            account.Balance == 0 ? "Kredi bakiyesi tükendi" : "Kredi bakiyesi azalıyor",
-            $"Kalan kredi {account.Balance:N0}; uyarı eşiği {account.LowBalanceThreshold:N0}. Yeni siparişlerin durmaması için kredi yükleyin.");
+            account.Balance < 0 ? "Kredi bakiyesi eksiye düştü" : account.Balance == 0 ? "Kredi bakiyesi tükendi" : "Kredi bakiyesi azalıyor",
+            account.Balance <= 0
+                ? $"Kalan kredi {account.Balance:N0}. Panel ve telefon siparişleri durdu; platform ve kasa siparişleri " +
+                  $"{BusinessCreditAccount.IntegrationOverdraftLimit:N0} kredilik eksi bakiyeye kadar alınır. Kredi yükleyin."
+                : $"Kalan kredi {account.Balance:N0}; uyarı eşiği {account.LowBalanceThreshold:N0}. Yeni siparişlerin durmaması için kredi yükleyin.");
     }
 
     private sealed record AlertCandidate(string Key, OperationalAlertType Type,
