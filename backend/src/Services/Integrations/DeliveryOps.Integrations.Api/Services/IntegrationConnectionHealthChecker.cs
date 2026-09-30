@@ -7,6 +7,7 @@ namespace DeliveryOps.Integrations.Api.Services;
 public sealed class IntegrationConnectionHealthChecker(
     IntegrationsDbContext context,
     YemeksepetiPartnerClient yemeksepetiPartnerClient,
+    GetirFoodClient getirFoodClient,
     CoreOrdersClient coreOrdersClient,
     TimeProvider timeProvider,
     IOptions<IntegrationHealthCheckOptions> options,
@@ -21,16 +22,25 @@ public sealed class IntegrationConnectionHealthChecker(
         string message;
         try
         {
-            YemeksepetiConnectionTestResult result = await yemeksepetiPartnerClient
-                .TestConnectionAsync(connection, cancellationToken);
+            if (connection.Provider == IntegrationProvider.Getir)
+            {
+                GetirLoginResult result = await getirFoodClient.TestConnectionAsync(connection, cancellationToken);
+                tokenExpiresAt = result.ExpiresAtUtc;
+                message = "Getir anahtarları doğrulandı.";
+            }
+            else
+            {
+                YemeksepetiConnectionTestResult result = await yemeksepetiPartnerClient
+                    .TestConnectionAsync(connection, cancellationToken);
+                tokenExpiresAt = result.TokenExpiresAtUtc;
+                message = "OAuth kimlik bilgileri doğrulandı.";
+            }
             success = true;
-            tokenExpiresAt = result.TokenExpiresAtUtc;
-            message = "OAuth kimlik bilgileri doğrulandı.";
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             success = false;
-            message = GetSafeMessage(exception);
+            message = GetSafeMessage(exception, connection.Provider == IntegrationProvider.Getir ? "Getir" : "Yemeksepeti");
             logger.LogWarning("Integration connection {ConnectionId} health check failed: {Message}",
                 connection.Id, message);
         }
@@ -60,16 +70,16 @@ public sealed class IntegrationConnectionHealthChecker(
             checkedAt, tokenExpiresAt, message, connection.ConsecutiveHealthCheckFailures);
     }
 
-    private static string GetSafeMessage(Exception exception) => exception switch
+    private static string GetSafeMessage(Exception exception, string provider) => exception switch
     {
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or
             System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden } =>
-            "Client ID veya client secret doğrulanamadı.",
+            $"{provider} kimlik bilgileri doğrulanamadı.",
         HttpRequestException { StatusCode: not null } httpException =>
-            $"Yemeksepeti OAuth servisi {(int)httpException.StatusCode.Value} durum kodu döndürdü.",
-        HttpRequestException => "Yemeksepeti OAuth servisine ulaşılamadı.",
-        TaskCanceledException => "Yemeksepeti OAuth servisi zaman aşımına uğradı.",
-        _ => "OAuth kimlik bilgileri doğrulanamadı. Ayarları kontrol edin."
+            $"{provider} servisi {(int)httpException.StatusCode.Value} durum kodu döndürdü.",
+        HttpRequestException => $"{provider} servisine ulaşılamadı.",
+        TaskCanceledException => $"{provider} servisi zaman aşımına uğradı.",
+        _ => "Kimlik bilgileri doğrulanamadı. Ayarları kontrol edin."
     };
 }
 

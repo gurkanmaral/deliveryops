@@ -10,7 +10,9 @@ public sealed class WebhookAuthenticator(WebhookSecretProtector secretProtector,
     public bool Verify(HttpRequest request, IntegrationConnection connection, string rawPayload)
     {
         if (connection.AuthMode == WebhookAuthMode.ApiKey)
-            return request.Headers.TryGetValue("X-DeliveryOps-Key", out var suppliedSecret) && VerifyHash(
+            // Getir sends the shared key it was given in "x-api-key"; our own clients use X-DeliveryOps-Key.
+            return (request.Headers.TryGetValue("X-DeliveryOps-Key", out var suppliedSecret) ||
+                    request.Headers.TryGetValue("x-api-key", out suppliedSecret)) && VerifyHash(
                 suppliedSecret.ToString(), connection, timeProvider.GetUtcNow());
         if (connection.AuthMode == WebhookAuthMode.StaticAuthorization)
             return request.Headers.TryGetValue("Authorization", out var authorization) && VerifyHash(

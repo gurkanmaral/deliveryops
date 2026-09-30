@@ -219,6 +219,23 @@ public sealed class OrderTests
         Assert.Equal(OrderStatus.Delivered, order.Status);
     }
 
+    [Theory]
+    [InlineData(DeliveryFulfillmentType.ProviderCourier)]
+    [InlineData(DeliveryFulfillmentType.CustomerPickup)]
+    public void Handover_completes_orders_that_leave_without_our_courier(DeliveryFulfillmentType fulfillment)
+    {
+        Order order = Order.Create(Guid.NewGuid(), Guid.NewGuid(), "G-1", "Ada", "05550000000",
+            "Kadıköy", OrderSource.Getir, 100m, Guid.NewGuid().ToString("N"),
+            new string('A', 64), Guid.NewGuid(), deliveryFulfillment: fulfillment);
+        Guid userId = Guid.NewGuid();
+        order.ChangeStatus(OrderStatus.Confirmed, userId);
+
+        order.ApplyProviderDeliveryStatus(OrderStatus.Delivered, userId);
+
+        Assert.Equal(OrderStatus.Delivered, order.Status);
+        Assert.Equal(IntegrationOutboxMessage.CreateForOrder(order).OrderId, order.Id);
+    }
+
     [Fact]
     public void ChangeStatus_RejectsAssignedWithoutCourier()
     {

@@ -177,19 +177,27 @@ public sealed class GetirFoodV1OrderAdapter : IOrderProviderAdapter
             JsonElement location = ProviderPayload.RequiredObject(client, "location", "Getir");
             ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(location, "lat", "lon", "Getir");
             string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
-                { ProviderPayload.OptionalString(addressObject, "description"), ProviderPayload.OptionalString(root, "clientNote") }
+                {
+                    ProviderPayload.OptionalString(addressObject, "description"),
+                    ProviderPayload.OptionalString(root, "clientNote"),
+                    IsTrue(root, "doNotKnock") ? "Zili çalmayın" : string.Empty,
+                    IsTrue(root, "dropOffAtDoor") ? "Kapıya bırakın" : string.Empty,
+                    PaymentText(root)
+                }
                 .Where(x => !string.IsNullOrWhiteSpace(x))));
+            if (instructions?.Length > 2000) instructions = instructions[..2000];
             decimal total = ProviderPayload.OptionalDecimal(root, "totalDiscountedPrice")
                 ?? ProviderPayload.RequiredDecimal(root, "totalPrice", "Getir");
             InboundOrderRequest order = new(orderId, name, phone, address, total,
-                coordinates.Latitude, coordinates.Longitude, instructions,
-                ProviderPayload.OptionalObject(root, "courier").HasValue
-                    ? ProviderDeliveryFulfillment.ProviderCourier
-                    : ProviderDeliveryFulfillment.MerchantCourier);
+                coordinates.Latitude, coordinates.Longitude, instructions, ResolveFulfillment(root));
             ProviderPayload.ValidateOrder(order);
+            string hash = ProviderPayload.Hash(rawPayload);
+            // Getir posts cancellations to a second URL with the same order shape plus the cancel fields;
+            // both URLs may point here, so the payload decides which event it is.
+            if (IsCancellation(root))
+                return ProviderPayload.Complete(rawPayload, $"{orderId}:cancelled", "order.cancelled", order, hash);
             string status = ProviderPayload.OptionalStringOrNumber(root, "status");
             string checkoutDate = ProviderPayload.OptionalString(root, "checkoutDate");
-            string hash = ProviderPayload.Hash(rawPayload);
             string eventId = $"{orderId}:{(string.IsNullOrWhiteSpace(status) ? "created" : status)}:{(string.IsNullOrWhiteSpace(checkoutDate) ? hash[..12] : checkoutDate)}";
             return ProviderPayload.Complete(rawPayload, eventId, "order.created", order, hash);
         }
@@ -197,6 +205,31 @@ public sealed class GetirFoodV1OrderAdapter : IOrderProviderAdapter
         {
             throw new ProviderPayloadException("Getir webhook JSON formatı geçersiz.", exception);
         }
+    }
+
+    // deliveryType 1 = Getir courier, 2 = restaurant's own courier (GetirFood API docs).
+    private static ProviderDeliveryFulfillment ResolveFulfillment(JsonElement root) =>
+        ProviderPayload.OptionalStringOrNumber(root, "deliveryType") switch
+        {
+            "1" => ProviderDeliveryFulfillment.ProviderCourier,
+            "2" => ProviderDeliveryFulfillment.MerchantCourier,
+            _ => ProviderPayload.OptionalObject(root, "courier").HasValue
+                ? ProviderDeliveryFulfillment.ProviderCourier
+                : ProviderDeliveryFulfillment.MerchantCourier
+        };
+
+    private static bool IsCancellation(JsonElement root) =>
+        !string.IsNullOrWhiteSpace(ProviderPayload.OptionalString(root, "cancelDate")) ||
+        ProviderPayload.OptionalObject(root, "cancelReason").HasValue;
+
+    private static bool IsTrue(JsonElement root, string name) =>
+        root.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.True;
+
+    private static string PaymentText(JsonElement root)
+    {
+        JsonElement? text = ProviderPayload.OptionalObject(root, "paymentMethodText");
+        string value = text.HasValue ? ProviderPayload.OptionalString(text.Value, "tr") : string.Empty;
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : $"Ödeme: {value.Trim()}";
     }
 }
 

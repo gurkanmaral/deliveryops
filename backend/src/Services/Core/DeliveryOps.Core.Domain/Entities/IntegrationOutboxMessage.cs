@@ -22,8 +22,8 @@ public sealed class IntegrationOutboxMessage : Entity
 
     public static IntegrationOutboxMessage CreateForOrder(Order order)
     {
-        if (order.Source != OrderSource.Yemeksepeti)
-            throw new InvalidOperationException("Only provider orders can produce a Yemeksepeti status event.");
+        if (order.Source is not (OrderSource.Yemeksepeti or OrderSource.Getir))
+            throw new InvalidOperationException("Only Yemeksepeti and Getir orders produce provider status events.");
 
         Guid eventId = Guid.NewGuid();
         return new IntegrationOutboxMessage
@@ -40,6 +40,7 @@ public sealed class IntegrationOutboxMessage : Entity
                 order.ExternalId,
                 Source = order.Source,
                 Status = order.Status,
+                order.DeliveryFulfillment,
                 order.CancellationReason,
                 OccurredAtUtc = DateTimeOffset.UtcNow
             })

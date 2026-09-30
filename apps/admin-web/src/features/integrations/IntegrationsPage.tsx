@@ -198,8 +198,10 @@ export function IntegrationsPage() {
     mutationFn: (id: string) => postJson<OutboundEvent>(`/api/v1/integrations/outbound-events/${id}/retry`, {}, 'integrations'),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['integration-outbound-events'] }),
   })
-  const configureYemeksepeti = useMutation({
-    mutationFn: () => requestJson<IntegrationConnection>(`/api/v1/integrations/${credentialConnection!.id}/yemeksepeti-credentials`, { api: 'integrations', method: 'PUT', body: JSON.stringify({ clientId, clientSecret, chainId, environment: Number(providerEnvironment) }) }),
+  const configureCredentials = useMutation({
+    mutationFn: () => credentialConnection!.provider === 1
+      ? requestJson<IntegrationConnection>(`/api/v1/integrations/${credentialConnection!.id}/getir-credentials`, { api: 'integrations', method: 'PUT', body: JSON.stringify({ appSecretKey: clientId, restaurantSecretKey: clientSecret, environment: Number(providerEnvironment) }) })
+      : requestJson<IntegrationConnection>(`/api/v1/integrations/${credentialConnection!.id}/yemeksepeti-credentials`, { api: 'integrations', method: 'PUT', body: JSON.stringify({ clientId, clientSecret, chainId, environment: Number(providerEnvironment) }) }),
     onSuccess: () => { setCredentialConnection(null); setClientId(''); setClientSecret(''); setChainId(''); refresh() },
   })
   const testConnection = useMutation({
@@ -242,24 +244,36 @@ export function IntegrationsPage() {
     {issuedSecret?.secret && <article className="secret-card">
       <div><KeyRound size={21} /><div><strong>Bağlantı anahtarı yalnızca şimdi gösteriliyor</strong><p>Webhook adresi ve anahtarı güvenli şekilde POS veya sağlayıcı yapılandırmasına kaydedin.</p></div></div>
       <label>Webhook URL<span><code>{webhookUrl}</code><button onClick={() => void copy('url', webhookUrl)}><Copy size={15} /> {copied === 'url' ? 'Kopyalandı' : 'Kopyala'}</button></span></label>
-      <label>{issuedSecret.authMode === 1 ? 'HMAC signing secret' : issuedSecret.authMode === 2 ? 'Authorization secret' : 'X-DeliveryOps-Key'}<span><code>{issuedSecret.secret}</code><button onClick={() => void copy('secret', issuedSecret.secret!)}><Copy size={15} /> {copied === 'secret' ? 'Kopyalandı' : 'Kopyala'}</button></span></label>
+      <label>{issuedSecret.authMode === 1 ? 'HMAC signing secret' : issuedSecret.authMode === 2 ? 'Authorization secret' : issuedSecret.provider === 1 ? 'x-api-key' : 'X-DeliveryOps-Key'}<span><code>{issuedSecret.secret}</code><button onClick={() => void copy('secret', issuedSecret.secret!)}><Copy size={15} /> {copied === 'secret' ? 'Kopyalandı' : 'Kopyala'}</button></span></label>
       {issuedSecret.authMode === 1 && <p>İsteklerde Unix saniyesini <code>X-DeliveryOps-Timestamp</code>, <code>HMAC-SHA256(secret, timestamp + "." + rawBody)</code> sonucunu <code>X-DeliveryOps-Signature</code> başlığıyla gönderin.</p>}
       {issuedSecret.authMode === 2 && <p>Bu değeri Yemeksepeti Partner Portal webhook ayarındaki secret alanına girin. Gelen <code>Authorization</code> başlığı sabit zamanlı karşılaştırmayla doğrulanır.</p>}
+      {issuedSecret.provider === 1 && issuedSecret.authMode === 0 && <p>Getir panelinde (veya getiryemekapi@getir.com ile) <strong>yeni sipariş</strong> ve <strong>iptal edilen sipariş</strong> webhook adreslerinin ikisine de bu URL'yi, API anahtarı alanına bu değeri girin. Getir bu değeri <code>x-api-key</code> başlığıyla gönderir.</p>}
       {issuedSecret.previousSecretValidUntilUtc && <p>Önceki anahtar <strong>{new Date(issuedSecret.previousSecretValidUntilUtc).toLocaleString('tr-TR')}</strong> tarihine kadar geçerlidir. Sağlayıcı ayarını bu süre dolmadan güncelleyin.</p>}
       <button className="text-button secret-card__close" onClick={() => setIssuedSecret(null)}>Anahtarı gizle</button>
     </article>}
 
     {canWrite && credentialConnection && <article className="panel section-panel">
-      <div className="panel__heading"><div><h2>Yemeksepeti API erişimi</h2><p>{credentialConnection.name} için OAuth2 client-credentials ayarları</p></div><button className="text-button" onClick={() => setCredentialConnection(null)}>Kapat</button></div>
-      <form className="inline-form" onSubmit={event => { event.preventDefault(); configureYemeksepeti.mutate() }}>
-        <label>Ortam<select value={providerEnvironment} onChange={event => setProviderEnvironment(event.target.value)}><option value="0">Sandbox</option><option value="1">Production</option></select></label>
-        <label>Chain ID<input value={chainId} onChange={event => setChainId(event.target.value)} required /></label>
-        <label>Client ID<input value={clientId} onChange={event => setClientId(event.target.value)} autoComplete="off" required /></label>
-        <label>Client secret<input type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} autoComplete="new-password" required /></label>
-        <button className="primary-button" disabled={configureYemeksepeti.isPending}>Güvenli kaydet</button>
-      </form>
-      <p className="cell-sub">Client bilgileri şifreli saklanır ve API cevaplarında tekrar gösterilmez.</p>
-      {configureYemeksepeti.error && <p className="form-error form-error--panel">{configureYemeksepeti.error.message}</p>}
+      {credentialConnection.provider === 1 ? <>
+        <div className="panel__heading"><div><h2>Getir API erişimi</h2><p>{credentialConnection.name} için Getir Yemek anahtarları</p></div><button className="text-button" onClick={() => setCredentialConnection(null)}>Kapat</button></div>
+        <form className="inline-form" onSubmit={event => { event.preventDefault(); configureCredentials.mutate() }}>
+          <label>Ortam<select value={providerEnvironment} onChange={event => setProviderEnvironment(event.target.value)}><option value="0">Test</option><option value="1">Canlı</option></select></label>
+          <label>App secret key<input type="password" value={clientId} onChange={event => setClientId(event.target.value)} autoComplete="new-password" required /></label>
+          <label>Restaurant secret key<input type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} autoComplete="new-password" required /></label>
+          <button className="primary-button" disabled={configureCredentials.isPending}>{configureCredentials.isPending ? 'Getir ile doğrulanıyor' : 'Doğrula ve kaydet'}</button>
+        </form>
+        <p className="cell-sub">Anahtarlar kaydedilmeden önce Getir'e giriş yapılarak doğrulanır, şifreli saklanır ve tekrar gösterilmez. Gelen siparişler otomatik olarak Getir'de onaylanır.</p>
+      </> : <>
+        <div className="panel__heading"><div><h2>Yemeksepeti API erişimi</h2><p>{credentialConnection.name} için OAuth2 client-credentials ayarları</p></div><button className="text-button" onClick={() => setCredentialConnection(null)}>Kapat</button></div>
+        <form className="inline-form" onSubmit={event => { event.preventDefault(); configureCredentials.mutate() }}>
+          <label>Ortam<select value={providerEnvironment} onChange={event => setProviderEnvironment(event.target.value)}><option value="0">Sandbox</option><option value="1">Production</option></select></label>
+          <label>Chain ID<input value={chainId} onChange={event => setChainId(event.target.value)} required /></label>
+          <label>Client ID<input value={clientId} onChange={event => setClientId(event.target.value)} autoComplete="off" required /></label>
+          <label>Client secret<input type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} autoComplete="new-password" required /></label>
+          <button className="primary-button" disabled={configureCredentials.isPending}>Güvenli kaydet</button>
+        </form>
+        <p className="cell-sub">Client bilgileri şifreli saklanır ve API cevaplarında tekrar gösterilmez.</p>
+      </>}
+      {configureCredentials.error && <p className="form-error form-error--panel">{configureCredentials.error.message}</p>}
     </article>}
 
     {canWrite && <article className="panel section-panel">
@@ -281,9 +295,9 @@ export function IntegrationsPage() {
         {visibleConnections.map(connection => <tr key={connection.id}>
           <td><strong>{connection.name}</strong></td><td>{providerLabels[connection.provider] ?? 'Diğer'}</td>
           <td>{branches.data?.items.find(item => item.id === connection.branchId)?.name ?? connection.branchId.slice(0, 8)}</td><td>{['API anahtarı', 'HMAC-SHA256', 'Authorization secret'][connection.authMode] ?? 'Bilinmiyor'}<small className="cell-sub">{connection.adapterVersion}</small></td>
-          <td><span className={`pill pill--${connection.isActive ? 'green' : 'red'}`}>{connection.isActive ? 'Aktif' : 'Pasif'}</span>{connection.provider === 0 && <><small className="cell-sub">OAuth: {connection.credentialsConfigured ? `${connection.providerEnvironment === 1 ? 'Production' : 'Sandbox'} · ${connection.providerAccountId}` : 'Bekliyor'}</small>{connection.lastHealthCheckSucceeded !== null && <small className="cell-sub"><span className={`pill pill--${connection.lastHealthCheckSucceeded ? 'green' : 'red'}`}>{connection.lastHealthCheckSucceeded ? 'Bağlantı doğrulandı' : 'Bağlantı hatalı'}</span> · {new Intl.DateTimeFormat('tr-TR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(connection.lastHealthCheckAtUtc!))}</small>}{connection.consecutiveHealthCheckFailures > 0 && <small className="cell-sub">Ardışık hata: {connection.consecutiveHealthCheckFailures}</small>}{connection.lastHealthCheckMessage && <small className="cell-sub">{connection.lastHealthCheckMessage}</small>}</>}</td>
+          <td><span className={`pill pill--${connection.isActive ? 'green' : 'red'}`}>{connection.isActive ? 'Aktif' : 'Pasif'}</span>{(connection.provider === 0 || connection.provider === 1) && <><small className="cell-sub">{connection.provider === 1 ? 'API' : 'OAuth'}: {connection.credentialsConfigured ? `${connection.providerEnvironment === 1 ? 'Production' : 'Sandbox'} · ${connection.providerAccountId}` : 'Bekliyor'}</small>{connection.lastHealthCheckSucceeded !== null && <small className="cell-sub"><span className={`pill pill--${connection.lastHealthCheckSucceeded ? 'green' : 'red'}`}>{connection.lastHealthCheckSucceeded ? 'Bağlantı doğrulandı' : 'Bağlantı hatalı'}</span> · {new Intl.DateTimeFormat('tr-TR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(connection.lastHealthCheckAtUtc!))}</small>}{connection.consecutiveHealthCheckFailures > 0 && <small className="cell-sub">Ardışık hata: {connection.consecutiveHealthCheckFailures}</small>}{connection.lastHealthCheckMessage && <small className="cell-sub">{connection.lastHealthCheckMessage}</small>}</>}</td>
           <td><button className="row-action" onClick={() => void copy(connection.id, `${getIntegrationsApiUrl()}${connection.webhookPath}`)}><Copy size={13} /> {copied === connection.id ? 'Kopyalandı' : 'URL'}</button></td>
-          <td className="table-actions">{canWrite && <>{connection.provider === 0 && <><button className="row-action" onClick={() => { setCredentialConnection(connection); setChainId(connection.providerAccountId ?? ''); setProviderEnvironment(String(connection.providerEnvironment)) }}><KeyRound size={13} /> OAuth ayarla</button>{connection.credentialsConfigured && <button className="row-action" onClick={() => testConnection.mutate(connection.id)} disabled={testConnection.isPending}><Wifi size={13} /> {testConnection.isPending && testConnection.variables === connection.id ? 'Test ediliyor' : 'Bağlantıyı test et'}</button>}</>}<button className="row-action" onClick={() => rotate.mutate(connection.id)} disabled={rotate.isPending}><RefreshCw size={13} /> Anahtarı yenile</button><button className="row-action" onClick={() => toggle.mutate({ id: connection.id, isActive: !connection.isActive })} disabled={toggle.isPending}>{connection.isActive ? 'Pasife al' : 'Aktifleştir'}</button></>}</td>
+          <td className="table-actions">{canWrite && <>{(connection.provider === 0 || connection.provider === 1) && <><button className="row-action" onClick={() => { setCredentialConnection(connection); setClientId(''); setClientSecret(''); setChainId(connection.provider === 0 ? connection.providerAccountId ?? '' : ''); setProviderEnvironment(String(connection.providerEnvironment)) }}><KeyRound size={13} /> {connection.provider === 1 ? 'Anahtarları gir' : 'OAuth ayarla'}</button>{connection.credentialsConfigured && <button className="row-action" onClick={() => testConnection.mutate(connection.id)} disabled={testConnection.isPending}><Wifi size={13} /> {testConnection.isPending && testConnection.variables === connection.id ? 'Test ediliyor' : 'Bağlantıyı test et'}</button>}</>}<button className="row-action" onClick={() => rotate.mutate(connection.id)} disabled={rotate.isPending}><RefreshCw size={13} /> Anahtarı yenile</button><button className="row-action" onClick={() => toggle.mutate({ id: connection.id, isActive: !connection.isActive })} disabled={toggle.isPending}>{connection.isActive ? 'Pasife al' : 'Aktifleştir'}</button></>}</td>
         </tr>)}
       </tbody></table></div>
       {visibleConnections.length === 0 && <p className="empty-state">Bu işletme için entegrasyon bağlantısı bulunmuyor.</p>}

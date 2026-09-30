@@ -308,7 +308,18 @@ Webhook secret yenilendiğinde eski secret varsayılan olarak 24 saat daha kabul
 
 Birden fazla Integrations API instance'ı kullanılan canlı ortamda Data Protection key ring bütün instance'lar arasında paylaşılmalı ve kalıcı bir secret store ile korunmalıdır; aksi halde başka instance tarafından oluşturulan HMAC secret çözülemez.
 
-Bu sözleşme Windows POS uygulaması için doğrudan kullanılabilir. Yemeksepeti inbound adaptörü resmî Partner API v2 sözleşmesine göre hazırdır. Getir adaptörü, kurumsal erişimle sağlanan güncel payload ve doğrulama sözleşmesi alınana kadar `canonical-v1` olarak tutulur; doğrulanmamış bir sağlayıcı sözleşmesi varsayılmaz.
+Bu sözleşme Windows POS uygulaması için doğrudan kullanılabilir. Yemeksepeti inbound adaptörü resmî Partner API v2 sözleşmesine göre hazırdır. Getir için GetirFood API v1.5.8 sözleşmesine göre `getir-food-v1` adaptörü kullanılır (aşağıya bakın); `canonical-v1` simülatör ve yerel test bağlantıları için kalır.
+
+### Getir Yemek entegrasyonu
+
+1. Panelde sağlayıcı **Getir**, doğrulama **API anahtarı** seçilerek bağlantı oluşturulur. Gösterilen webhook URL'si Getir'e hem *yeni sipariş* hem *iptal edilen sipariş* adresi olarak, anahtar ise `x-api-key` değeri olarak verilir (getiryemekapi@getir.com).
+2. `Anahtarları gir` ile `appSecretKey`, `restaurantSecretKey` ve ortam (test/canlı) kaydedilir. Kaydetmeden önce `POST /auth/login` ile doğrulanır; anahtarlar şifreli saklanır, token (1 saat) bellekte tutulur ve 401'de bir kez yenilenir. `Bağlantıyı test et` ve periyodik sağlık kontrolü aynı girişi kullanır.
+3. Yeni sipariş webhook'u Core siparişi oluşturulur oluşturulmaz Getir'de otomatik onaylanır (`verify`, ileri tarihli ve onay bekleyen siparişlerde `verify-scheduled`). Core siparişi oluşturulamazsa (ör. kredi yetersiz) onay gönderilmez; Getir restoranı arar.
+4. İptal webhook'u siparişi Core'da iptal eder; kurye paketi aldıktan sonra gelen iptaller operasyon uyarısı üretir.
+5. Sipariş *Kurye bekliyor* (Hazırlandı) olduğunda `prepare`, teslim edildiğinde Getir kuryesiyle giden siparişlerde `handover`, restoran kuryesiyle giden siparişlerde `deliver` gönderilir. Getir adımlar arasında en az 1 dakika istediği için erken çağrılar backoff ile yeniden denenir; hata cevabında sipariş Getir'de sorgulanıp adım zaten yapılmışsa başarılı sayılır.
+6. Getir kuryesiyle (`deliveryType = 1`) gelen siparişler kurye havuzuna düşmez; panelde **Getir kuryesine teslim edildi** düğmesi siparişi kapatır ve Getir'e `handover` bildirir.
+
+Panelden yapılan iptaller Getir'e gönderilmez (Getir iptal nedeni kimliği ister); Getir siparişlerini Getir restoran panelinden iptal edin. Getir siparişlerinin mutfağa hemen düşmesi için işletmede otomatik onayın açık olması önerilir.
 
 ### Yemeksepeti durum senkronizasyonu
 

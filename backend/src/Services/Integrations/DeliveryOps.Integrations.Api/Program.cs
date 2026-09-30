@@ -76,6 +76,8 @@ builder.Services.AddScoped<InboundEventProcessor>();
 builder.Services.AddHostedService<InboundEventWorker>();
 builder.Services.AddHttpClient("YemeksepetiPartner", client => client.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddSingleton<YemeksepetiPartnerClient>();
+builder.Services.AddHttpClient(GetirFoodClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<GetirFoodClient>();
 builder.Services.Configure<IntegrationHealthCheckOptions>(
     builder.Configuration.GetSection("IntegrationHealthChecks"));
 builder.Services.AddScoped<IntegrationConnectionHealthChecker>();

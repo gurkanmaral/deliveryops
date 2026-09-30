@@ -93,6 +93,7 @@ public sealed record OrderPaymentInput(PaymentMethod Method, bool IsPaid = false
     string? Reference = null, DateTimeOffset? PaidAtUtc = null);
 public sealed record RecordOrderPaymentCommand(Guid Id, PaymentMethod Method, decimal? Amount, string? Reference)
     : IRequest<Result<OrderResponse>>;
+public sealed record CompleteOrderHandoverCommand(Guid Id) : IRequest<Result<OrderResponse>>;
 public sealed record GetCourierShiftSummaryQuery : IRequest<Result<CourierShiftSummaryResponse>>;
 public sealed record CourierShiftSummaryResponse(Guid CourierId, bool IsOnShift, DateTimeOffset? ShiftStartedAtUtc,
     int DeliveredCount, int ActiveOrderCount, decimal CashCollected, decimal CardCollected, int CollectionCount,

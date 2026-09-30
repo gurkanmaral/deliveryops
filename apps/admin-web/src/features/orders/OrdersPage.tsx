@@ -42,6 +42,7 @@ interface Order {
   paymentReference?: string
   paymentChannel?: number
   deliveredDistanceMeters?: number
+  deliveryFulfillment?: number
 }
 
 interface DispatchQueueItem {
@@ -156,6 +157,7 @@ export function OrdersPage() {
   const changeStatus = useMutation({ mutationFn: ({ id, status }: { id: string; status: number }) => requestJson<Order>(`/api/v1/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), onSuccess: refresh })
   const assign = useMutation({ mutationFn: ({ id, courierId }: { id: string; courierId: string }) => requestJson<Order>(`/api/v1/orders/${id}/courier`, { method: 'PUT', body: JSON.stringify({ courierId }) }), onSuccess: refresh })
   const recordPayment = useMutation({ mutationFn: ({ id, method }: { id: string; method: number }) => postJson<Order>(`/api/v1/orders/${id}/payment`, { method }), onSuccess: refresh })
+  const handover = useMutation({ mutationFn: (id: string) => postJson<Order>(`/api/v1/orders/${id}/handover`, {}), onSuccess: refresh })
   const retryDispatch = useMutation({ mutationFn: (id: string) => postJson<void>(`/api/v1/dispatch/orders/${id}/retry`, {}), onSuccess: refresh })
   const availableOrders = dispatchQueue.data?.items ?? []
   const activeCouriers = couriers.data?.items.filter(courier => courier.isActive) ?? []
@@ -246,7 +248,7 @@ export function OrdersPage() {
           <td><span className={`pill pill--${order.status === 6 ? 'green' : order.status === 7 || order.status === 8 ? 'red' : order.status === 2 ? 'amber' : 'blue'}`}>{statuses[order.status]}</span></td>
           <td><PaymentCell order={order} canRecord={canWrite} onRecord={method => recordPayment.mutate({ id: order.id, method })} /></td>
           <td><span className="order-source">{sources[order.source]}</span></td>
-          <td>{canTransition ? <OrderAction order={order} onChange={status => changeStatus.mutate({ id: order.id, status })} /> : <span className="muted">—</span>}</td>
+          <td>{canTransition ? <OrderAction order={order} onChange={status => changeStatus.mutate({ id: order.id, status })} onHandover={() => handover.mutate(order.id)} /> : <span className="muted">—</span>}</td>
         </tr>)}
       </tbody></table></div>
       {!orders.isLoading && orders.data?.items.length === 0 && <p className="empty-state order-empty">Filtrelere uygun sipariş bulunamadı.</p>}
@@ -255,7 +257,7 @@ export function OrdersPage() {
         <span>{orders.data?.totalCount ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, orders.data.totalCount)} / ${orders.data.totalCount}` : '0 kayıt'}</span>
         <div><button className="icon-button" aria-label="Önceki sayfa" disabled={page <= 1 || orders.isFetching} onClick={() => setPage(current => Math.max(1, current - 1))}><ChevronLeft size={17} /></button><b>{page} / {Math.max(1, orders.data?.totalPages ?? 1)}</b><button className="icon-button" aria-label="Sonraki sayfa" disabled={page >= (orders.data?.totalPages ?? 1) || orders.isFetching} onClick={() => setPage(current => current + 1)}><ChevronRight size={17} /></button></div>
       </div>
-      {(assign.error || changeStatus.error) && <p className="form-error form-error--panel">{assign.error?.message ?? changeStatus.error?.message}</p>}
+      {(assign.error || changeStatus.error || handover.error) && <p className="form-error form-error--panel">{assign.error?.message ?? changeStatus.error?.message ?? handover.error?.message}</p>}
     </article>
   </section>
 }
@@ -300,7 +302,18 @@ function PaymentCell({ order, canRecord, onRecord }: { order: Order; canRecord: 
   </span>
 }
 
-function OrderAction({ order, onChange }: { order: Order; onChange(status: number): void }) {
+function OrderAction({ order, onChange, onHandover }: { order: Order; onChange(status: number): void; onHandover(): void }) {
+  // Orders leaving with the platform's courier (e.g. Getir) or picked up at the counter never pass
+  // through our courier flow; the handover button closes them and notifies the platform.
+  if (order.deliveryFulfillment === 1 || order.deliveryFulfillment === 2) {
+    if (![0, 1, 2, 5].includes(order.status)) return <span className="muted">—</span>
+    const label = order.deliveryFulfillment === 2 ? 'Müşteriye teslim edildi' : order.source === 4 ? 'Getir kuryesine teslim edildi' : 'Platform kuryesine teslim edildi'
+    const ready = order.status === 0 ? { status: 1, label: 'Onayla' } : order.status === 1 ? { status: 2, label: 'Hazırlandı' } : null
+    return <span className="billing-row-actions">
+      {ready && order.allowedNextStatuses.includes(ready.status) && <button className="row-action" onClick={() => onChange(ready.status)}>{ready.label}</button>}
+      <button className="row-action row-action--primary" onClick={() => { if (window.confirm(`${label} olarak işaretlensin mi?`)) onHandover() }}>{label}</button>
+    </span>
+  }
   const next: Record<number, { status: number; label: string }> = {
     0: { status: 1, label: 'Onayla' }, 1: { status: 2, label: 'Kurye beklet' },
     3: { status: 4, label: 'Teslim aldı' }, 4: { status: 5, label: 'Yola çıkar' },
