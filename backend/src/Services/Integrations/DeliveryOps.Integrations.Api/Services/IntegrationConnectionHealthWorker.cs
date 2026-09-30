@@ -43,7 +43,8 @@ public sealed class IntegrationConnectionHealthWorker(
         {
             IntegrationsDbContext context = scope.ServiceProvider.GetRequiredService<IntegrationsDbContext>();
             ids = await context.Connections.AsNoTracking()
-                .Where(x => x.IsActive && (x.Provider == IntegrationProvider.Yemeksepeti || x.Provider == IntegrationProvider.Getir) &&
+                .Where(x => x.IsActive && (x.Provider == IntegrationProvider.Yemeksepeti || x.Provider == IntegrationProvider.Getir ||
+                             x.Provider == IntegrationProvider.Trendyol) &&
                             x.ProtectedCredentials != null && x.ProviderAccountId != null &&
                             (x.LastAutomaticHealthCheckAtUtc == null ||
                              x.LastAutomaticHealthCheckAtUtc <= dueBefore))

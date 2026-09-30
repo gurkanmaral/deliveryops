@@ -78,6 +78,10 @@ builder.Services.AddHttpClient("YemeksepetiPartner", client => client.Timeout = 
 builder.Services.AddSingleton<YemeksepetiPartnerClient>();
 builder.Services.AddHttpClient(GetirFoodClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<GetirFoodClient>();
+builder.Services.AddHttpClient(TrendyolGoClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<TrendyolGoClient>();
+builder.Services.AddScoped<InboundEventIngestor>();
+builder.Services.AddHostedService<TrendyolOrderPollingWorker>();
 builder.Services.Configure<IntegrationHealthCheckOptions>(
     builder.Configuration.GetSection("IntegrationHealthChecks"));
 builder.Services.AddScoped<IntegrationConnectionHealthChecker>();

@@ -6,8 +6,8 @@ using System.Text.Json;
 namespace DeliveryOps.Integrations.Api.Services;
 
 public sealed class OutboundEventProcessor(IntegrationsDbContext context,
-    YemeksepetiPartnerClient yemeksepetiClient, GetirFoodClient getirClient, TimeProvider timeProvider,
-    ILogger<OutboundEventProcessor> logger)
+    YemeksepetiPartnerClient yemeksepetiClient, GetirFoodClient getirClient, TrendyolGoClient trendyolClient,
+    IConfiguration configuration, TimeProvider timeProvider, ILogger<OutboundEventProcessor> logger)
 {
     private const int MaxAttempts = 5;
 
@@ -26,9 +26,12 @@ public sealed class OutboundEventProcessor(IntegrationsDbContext context,
         try
         {
             if (!item.Connection.IsActive) throw new InvalidOperationException("Entegrasyon bağlantısı pasif.");
-            if (item.Connection.Provider == IntegrationProvider.Getir)
+            if (item.Connection.Provider is IntegrationProvider.Getir or IntegrationProvider.Trendyol)
             {
-                await ApplyGetirStatusAsync(item, cancellationToken);
+                if (item.Connection.Provider == IntegrationProvider.Getir)
+                    await ApplyGetirStatusAsync(item, cancellationToken);
+                else
+                    await ApplyTrendyolStatusAsync(item, cancellationToken);
                 item.Complete(timeProvider.GetUtcNow());
                 await context.SaveChangesAsync(CancellationToken.None);
                 await transaction.CommitAsync(CancellationToken.None);
@@ -53,6 +56,86 @@ public sealed class OutboundEventProcessor(IntegrationsDbContext context,
         }
         await context.SaveChangesAsync(CancellationToken.None);
         await transaction.CommitAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Trendyol only accepts forward steps (invoiced → manual-shipped → manual-delivered), so the earlier
+    /// steps are repeated first; a step the package already passed is reconciled as success by the client.
+    /// </summary>
+    private async Task ApplyTrendyolStatusAsync(OutboundOrderEvent item, CancellationToken cancellationToken)
+    {
+        if (!item.Connection.CredentialsConfigured)
+        {
+            logger.LogWarning("Trendyol {Status} for order {OrderId} not sent: connection {ConnectionId} has no API keys.",
+                item.ProviderStatus, item.ExternalOrderId, item.ConnectionId);
+            return;
+        }
+        List<string> payloads = await context.InboundOrderEvents.AsNoTracking()
+            .Where(x => x.ConnectionId == item.ConnectionId && x.ExternalOrderId == item.ExternalOrderId)
+            .OrderBy(x => x.ReceivedAtUtc)
+            .Select(x => x.RawPayload).ToListAsync(cancellationToken);
+        string packageId = payloads.Select(x => InboundEventProcessor.ReadTrendyolPackage(x).PackageId)
+                               .FirstOrDefault(x => x is not null)
+                           ?? throw new InvalidOperationException("Trendyol paket numarası bulunamadı.");
+        try
+        {
+            switch (item.ProviderStatus)
+            {
+                case Controllers.TrendyolStatuses.Unsupplied:
+                    List<string> itemIds = payloads.Select(ReadTrendyolItemIds).FirstOrDefault(x => x.Count > 0) ?? [];
+                    if (itemIds.Count == 0) throw new InvalidOperationException("Trendyol paket ürünleri bulunamadı.");
+                    // 623 = "Mağaza siparişi hazırlayamıyor", the restaurant-side reason valid for every model.
+                    int reasonId = configuration.GetValue("Trendyol:CancelReasonId", 623);
+                    await trendyolClient.UnsupplyAsync(item.Connection, packageId, itemIds, reasonId, cancellationToken);
+                    break;
+                case Controllers.TrendyolStatuses.Invoiced:
+                    await trendyolClient.InvoiceAsync(item.Connection, packageId, cancellationToken);
+                    break;
+                case Controllers.TrendyolStatuses.Shipped:
+                    await trendyolClient.InvoiceAsync(item.Connection, packageId, cancellationToken);
+                    await trendyolClient.ShipAsync(item.Connection, packageId, cancellationToken);
+                    break;
+                case Controllers.TrendyolStatuses.Delivered:
+                    await trendyolClient.InvoiceAsync(item.Connection, packageId, cancellationToken);
+                    await trendyolClient.ShipAsync(item.Connection, packageId, cancellationToken);
+                    await trendyolClient.DeliverAsync(item.Connection, packageId, cancellationToken);
+                    break;
+            }
+        }
+        catch (TrendyolPackageCancelledException exception)
+        {
+            logger.LogInformation(exception, "Skipping Trendyol {Status} for cancelled package {PackageId}.",
+                item.ProviderStatus, packageId);
+        }
+    }
+
+    /// <summary>Every not-yet-cancelled packageItemId: a full cancellation must list all of them.</summary>
+    public static List<string> ReadTrendyolItemIds(string rawPayload)
+    {
+        List<string> ids = [];
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(rawPayload);
+            JsonElement root = document.RootElement;
+            if (root.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Array &&
+                content.GetArrayLength() == 1)
+                root = content[0];
+            if (!root.TryGetProperty("lines", out JsonElement lines) || lines.ValueKind != JsonValueKind.Array) return ids;
+            foreach (JsonElement line in lines.EnumerateArray())
+            {
+                if (!line.TryGetProperty("items", out JsonElement items) || items.ValueKind != JsonValueKind.Array) continue;
+                foreach (JsonElement packageItem in items.EnumerateArray())
+                {
+                    if (packageItem.TryGetProperty("isCancelled", out JsonElement cancelled) &&
+                        cancelled.ValueKind == JsonValueKind.True) continue;
+                    if (!packageItem.TryGetProperty("packageItemId", out JsonElement id)) continue;
+                    string value = id.ValueKind == JsonValueKind.String ? id.GetString() ?? string.Empty : id.GetRawText();
+                    if (!string.IsNullOrWhiteSpace(value)) ids.Add(value);
+                }
+            }
+        }
+        catch (JsonException) { }
+        return ids;
     }
 
     /// <summary>

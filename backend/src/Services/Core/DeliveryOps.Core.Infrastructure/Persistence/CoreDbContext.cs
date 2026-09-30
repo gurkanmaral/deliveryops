@@ -74,7 +74,12 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options, IRequ
              x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.PickedUp or OrderStatus.Cancelled ||
              // Getir: ready → prepare; delivered → handover (Getir courier) or deliver (own courier).
              x.Entity.Source == OrderSource.Getir &&
-             x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.Delivered)).ToList();
+             x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.Delivered ||
+             // Trendyol: ready → invoiced; own courier left → manual-shipped; delivered → manual-delivered;
+             // restaurant cancellation → unsupplied.
+             x.Entity.Source == OrderSource.Trendyol &&
+             x.Entity.Status is OrderStatus.WaitingForCourier or OrderStatus.PickedUp or OrderStatus.Delivered
+                 or OrderStatus.Cancelled)).ToList();
         foreach (EntityEntry<Order> entry in orders)
             IntegrationOutbox.Add(IntegrationOutboxMessage.CreateForOrder(entry.Entity));
     }
