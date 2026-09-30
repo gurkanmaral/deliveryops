@@ -31,6 +31,30 @@ public sealed class CreditAccountTests
     }
 
     [Fact]
+    public void Platform_orders_may_use_the_overdraft_and_top_up_settles_it()
+    {
+        BusinessCreditAccount account = BusinessCreditAccount.Create(Guid.NewGuid());
+        for (int i = 0; i < BusinessCreditAccount.IntegrationOverdraftLimit; i++)
+            account.Consume(1, allowOverdraft: true);
+
+        Assert.Equal(-BusinessCreditAccount.IntegrationOverdraftLimit, account.Balance);
+        Assert.Throws<InvalidOperationException>(() => account.Consume(1, allowOverdraft: true));
+        Assert.Throws<InvalidOperationException>(() => account.Consume(1));
+
+        Assert.Equal(80, account.Add(100));
+    }
+
+    [Fact]
+    public void Positive_adjustment_is_allowed_while_balance_is_negative()
+    {
+        BusinessCreditAccount account = BusinessCreditAccount.Create(Guid.NewGuid());
+        account.Consume(5, allowOverdraft: true);
+
+        Assert.Equal(-2, account.Adjust(3));
+        Assert.Throws<InvalidOperationException>(() => account.Adjust(-1));
+    }
+
+    [Fact]
     public void Order_consumption_ledger_entry_requires_negative_amount_and_order()
     {
         Assert.Throws<ArgumentException>(() => CreditTransaction.Create(Guid.NewGuid(),

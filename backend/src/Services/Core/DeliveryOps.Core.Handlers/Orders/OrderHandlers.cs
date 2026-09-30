@@ -134,7 +134,9 @@ public sealed class CreateOrderHandler(ICoreDbContext context, IRequestContext r
         if (creditAccount is null)
             return Result<OrderResponse>.Failure(HandlerErrors.Conflict("İşletmenin kredi hesabı bulunmuyor. Platform yöneticisi kredi yüklemelidir."));
         int creditBalance;
-        try { creditBalance = creditAccount.Consume(1); }
+        // Platform (Yemeksepeti, Getir, Trendyol) and POS orders are already accepted on the customer's side;
+        // they may use the overdraft instead of being lost. Panel and phone orders stop at zero.
+        try { creditBalance = creditAccount.Consume(1, allowOverdraft: request.IsTrustedIntegration); }
         catch (InvalidOperationException exception) { return Result<OrderResponse>.Failure(HandlerErrors.Conflict(exception.Message)); }
         context.Orders.Add(order);
         context.CreditTransactions.Add(CreditTransaction.Create(request.BusinessId,

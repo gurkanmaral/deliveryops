@@ -4,6 +4,13 @@ namespace DeliveryOps.Core.Domain.Entities;
 
 public sealed class BusinessCreditAccount : Entity
 {
+    /// <summary>
+    /// Orders arriving from delivery platforms and the POS counter may take the balance down to this value so a
+    /// business that runs out of credit does not lose orders the platform has already accepted from the customer.
+    /// The next top-up settles the negative balance automatically.
+    /// </summary>
+    public const int IntegrationOverdraftLimit = 20;
+
     private BusinessCreditAccount() { }
     private BusinessCreditAccount(Guid businessId)
     {
@@ -33,10 +40,14 @@ public sealed class BusinessCreditAccount : Entity
         return Balance;
     }
 
-    public int Consume(int amount)
+    public int Consume(int amount, bool allowOverdraft = false)
     {
         if (amount < 1) throw new ArgumentOutOfRangeException(nameof(amount));
-        if (Balance < amount) throw new InvalidOperationException("Sipariş oluşturmak için yeterli kredi bulunmuyor.");
+        int floor = allowOverdraft ? -IntegrationOverdraftLimit : 0;
+        if (Balance - amount < floor)
+            throw new InvalidOperationException(allowOverdraft
+                ? $"Kredi bakiyesi ve {IntegrationOverdraftLimit} kredilik eksi bakiye limiti tükendi. Kredi yükleyin."
+                : "Sipariş oluşturmak için yeterli kredi bulunmuyor.");
         Balance -= amount;
         LifetimeConsumed += amount;
         MarkAsUpdated();
@@ -54,7 +65,7 @@ public sealed class BusinessCreditAccount : Entity
     public int Adjust(int amount)
     {
         if (amount is 0 or < -1_000_000 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(amount));
-        if (Balance + amount < 0) throw new InvalidOperationException("Kredi bakiyesi sıfırın altına düşürülemez.");
+        if (amount < 0 && Balance + amount < 0) throw new InvalidOperationException("Kredi bakiyesi sıfırın altına düşürülemez.");
         Balance = checked(Balance + amount);
         MarkAsUpdated();
         return Balance;
