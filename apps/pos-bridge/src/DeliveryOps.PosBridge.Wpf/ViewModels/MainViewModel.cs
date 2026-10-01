@@ -116,17 +116,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await ProcessCycleAsync(settings, cancellationToken);
+                // One failed cycle (a file locked by antivirus, the inbox briefly unreachable) must not stop
+                // the bridge: queued orders would silently stay on this computer.
+                try { await ProcessCycleAsync(settings, cancellationToken); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    ValidationMessage = exception.Message;
+                    Logs.Insert(0, new BridgeLogEntry(DateTimeOffset.Now, BridgeLogLevel.Error,
+                        $"Kontrol başarısız, tekrar denenecek: {exception.Message}"));
+                }
                 await Task.Delay(TimeSpan.FromSeconds(settings.PollIntervalSeconds), cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception exception)
-        {
-            ValidationMessage = exception.Message;
-            Logs.Insert(0, new BridgeLogEntry(DateTimeOffset.Now, BridgeLogLevel.Error, exception.Message));
-            IsRunning = false;
-        }
     }
 
     private async Task ProcessCycleAsync(BridgeRuntimeSettings settings, CancellationToken cancellationToken)

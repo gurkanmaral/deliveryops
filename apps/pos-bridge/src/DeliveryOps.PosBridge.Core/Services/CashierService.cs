@@ -129,7 +129,8 @@ public sealed class CashierService(IOrderSender sender, CashierOrderJournal jour
     {
         string text = $"Sipariş: {cart.Summary()}";
         if (!string.IsNullOrWhiteSpace(note)) text += $" • Not: {note.Trim()}";
-        return text.Length <= 2000 ? text : text[..2000];
+        // DeliveryOps accepts at most 1000 characters of delivery instructions.
+        return text.Length <= 1000 ? text : text[..999] + "…";
     }
 
     private static string? NormalizeReference(string? reference) =>

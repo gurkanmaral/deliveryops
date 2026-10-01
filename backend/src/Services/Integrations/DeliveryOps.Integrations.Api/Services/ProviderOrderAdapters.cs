@@ -176,16 +176,16 @@ public sealed class GetirFoodV1OrderAdapter : IOrderProviderAdapter
             if (string.IsNullOrWhiteSpace(address)) address = "Getir teslimat adresi";
             JsonElement location = ProviderPayload.RequiredObject(client, "location", "Getir");
             ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(location, "lat", "lon", "Getir");
+            // Short operational facts first: free-text notes are the part cut when the text is too long.
             string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
                 {
-                    ProviderPayload.OptionalString(addressObject, "description"),
-                    ProviderPayload.OptionalString(root, "clientNote"),
+                    PaymentText(root),
                     IsTrue(root, "doNotKnock") ? "Zili çalmayın" : string.Empty,
                     IsTrue(root, "dropOffAtDoor") ? "Kapıya bırakın" : string.Empty,
-                    PaymentText(root)
+                    ProviderPayload.OptionalString(addressObject, "description"),
+                    ProviderPayload.OptionalString(root, "clientNote")
                 }
                 .Where(x => !string.IsNullOrWhiteSpace(x))));
-            if (instructions?.Length > 2000) instructions = instructions[..2000];
             decimal total = ProviderPayload.OptionalDecimal(root, "totalDiscountedPrice")
                 ?? ProviderPayload.RequiredDecimal(root, "totalPrice", "Getir");
             InboundOrderRequest order = new(orderId, name, phone, address, total,
@@ -296,18 +296,18 @@ public sealed class TrendyolWebhookV1OrderAdapter : IOrderProviderAdapter
         string pinCode = ProviderPayload.OptionalStringOrNumber(addressObject, "pinCode");
         string callCenter = ProviderPayload.OptionalString(package, "callCenterPhone");
         string orderCode = ProviderPayload.OptionalString(package, "orderCode");
+        // Short operational facts first: free-text notes are the part cut when the text is too long.
         string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
         {
-            Clean(ProviderPayload.OptionalString(addressObject, "addressDescription")),
-            ProviderPayload.OptionalString(package, "customerNote"),
-            customer.HasValue ? ProviderPayload.OptionalString(customer.Value, "note") : string.Empty,
             string.IsNullOrWhiteSpace(orderCode) ? string.Empty : $"Sipariş kodu: {orderCode}",
             // Customer phone numbers are masked: the courier calls the given number and enters the pin code.
             string.IsNullOrWhiteSpace(pinCode) ? string.Empty
                 : $"Müşteri arama: {(string.IsNullOrWhiteSpace(callCenter) ? phone : callCenter)} · kod {pinCode}",
-            TrendyolPaymentText(package)
+            TrendyolPaymentText(package),
+            Clean(ProviderPayload.OptionalString(addressObject, "addressDescription")),
+            ProviderPayload.OptionalString(package, "customerNote"),
+            customer.HasValue ? ProviderPayload.OptionalString(customer.Value, "note") : string.Empty
         }.Where(x => !string.IsNullOrWhiteSpace(x))));
-        if (instructions is { Length: > 2000 }) instructions = instructions[..2000];
         decimal total = ProviderPayload.OptionalDecimal(package, "totalPrice")
             ?? ProviderPayload.OptionalDecimal(package, "packageGrossAmount") ?? 0;
         bool pickup = ProviderPayload.OptionalBoolean(package, "storePickupSelected") == true;
