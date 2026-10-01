@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace DeliveryOps.Integrations.Api.Services;
 
 public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrdersClient coreOrdersClient,
-    GetirFoodClient getirFoodClient, TimeProvider timeProvider, ILogger<InboundEventProcessor> logger)
+    GetirFoodClient getirFoodClient, TrendyolGoClient trendyolClient, IConfiguration configuration,
+    TimeProvider timeProvider, ILogger<InboundEventProcessor> logger)
 {
     private const int MaxAttempts = 5;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -85,6 +86,11 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
     private async Task AcceptOnProviderAsync(InboundOrderEvent inboundEvent, CancellationToken cancellationToken)
     {
         IntegrationConnection connection = inboundEvent.Connection;
+        if (connection.Provider == IntegrationProvider.Trendyol)
+        {
+            await AcceptOnTrendyolAsync(inboundEvent, cancellationToken);
+            return;
+        }
         if (connection.Provider != IntegrationProvider.Getir) return;
         if (!connection.CredentialsConfigured)
         {
@@ -105,6 +111,43 @@ public sealed class InboundEventProcessor(IntegrationsDbContext context, CoreOrd
             logger.LogInformation("Getir order {OrderId} was cancelled before it could be verified.",
                 inboundEvent.ExternalOrderId);
         }
+    }
+
+    /// <summary>Trendyol orders stay "Created" until the restaurant accepts them (picked).</summary>
+    private async Task AcceptOnTrendyolAsync(InboundOrderEvent inboundEvent, CancellationToken cancellationToken)
+    {
+        IntegrationConnection connection = inboundEvent.Connection;
+        if (!connection.CredentialsConfigured)
+        {
+            logger.LogWarning("Trendyol order {OrderId} could not be accepted: connection {ConnectionId} has no API keys.",
+                inboundEvent.ExternalOrderId, connection.Id);
+            return;
+        }
+        (string? packageId, int preparationTime) = ReadTrendyolPackage(inboundEvent.RawPayload);
+        if (packageId is null) return;
+        int minutes = preparationTime > 0
+            ? preparationTime
+            : Math.Clamp(configuration.GetValue("Trendyol:DefaultPreparationMinutes", 20), 5, 120);
+        try { await trendyolClient.AcceptAsync(connection, packageId, minutes, cancellationToken); }
+        catch (TrendyolPackageCancelledException)
+        {
+            logger.LogInformation("Trendyol package {PackageId} was cancelled before it could be accepted.", packageId);
+        }
+    }
+
+    public static (string? PackageId, int PreparationTime) ReadTrendyolPackage(string rawPayload)
+    {
+        using JsonDocument document = JsonDocument.Parse(rawPayload);
+        JsonElement root = document.RootElement;
+        if (root.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Array &&
+            content.GetArrayLength() == 1)
+            root = content[0];
+        string? id = root.TryGetProperty("id", out JsonElement value)
+            ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.GetRawText()
+            : null;
+        int minutes = root.TryGetProperty("preparationTime", out JsonElement time) && time.TryGetInt32(out int parsed)
+            ? parsed : 0;
+        return (string.IsNullOrWhiteSpace(id) ? null : id, minutes);
     }
 
     private static (bool Scheduled, int? Status) ReadGetirSchedule(string rawPayload)

@@ -8,6 +8,7 @@ public sealed class IntegrationConnectionHealthChecker(
     IntegrationsDbContext context,
     YemeksepetiPartnerClient yemeksepetiPartnerClient,
     GetirFoodClient getirFoodClient,
+    TrendyolGoClient trendyolClient,
     CoreOrdersClient coreOrdersClient,
     TimeProvider timeProvider,
     IOptions<IntegrationHealthCheckOptions> options,
@@ -28,6 +29,11 @@ public sealed class IntegrationConnectionHealthChecker(
                 tokenExpiresAt = result.ExpiresAtUtc;
                 message = "Getir anahtarları doğrulandı.";
             }
+            else if (connection.Provider == IntegrationProvider.Trendyol)
+            {
+                await trendyolClient.TestConnectionAsync(connection, cancellationToken);
+                message = "Trendyol API bilgileri doğrulandı.";
+            }
             else
             {
                 YemeksepetiConnectionTestResult result = await yemeksepetiPartnerClient
@@ -40,7 +46,12 @@ public sealed class IntegrationConnectionHealthChecker(
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             success = false;
-            message = GetSafeMessage(exception, connection.Provider == IntegrationProvider.Getir ? "Getir" : "Yemeksepeti");
+            message = GetSafeMessage(exception, connection.Provider switch
+            {
+                IntegrationProvider.Getir => "Getir",
+                IntegrationProvider.Trendyol => "Trendyol",
+                _ => "Yemeksepeti"
+            });
             logger.LogWarning("Integration connection {ConnectionId} health check failed: {Message}",
                 connection.Id, message);
         }

@@ -307,7 +307,7 @@ function OrderAction({ order, onChange, onHandover }: { order: Order; onChange(s
   // through our courier flow; the handover button closes them and notifies the platform.
   if (order.deliveryFulfillment === 1 || order.deliveryFulfillment === 2) {
     if (![0, 1, 2, 5].includes(order.status)) return <span className="muted">—</span>
-    const label = order.deliveryFulfillment === 2 ? 'Müşteriye teslim edildi' : order.source === 4 ? 'Getir kuryesine teslim edildi' : 'Platform kuryesine teslim edildi'
+    const label = order.deliveryFulfillment === 2 ? 'Müşteriye teslim edildi' : order.source === 4 ? 'Getir kuryesine teslim edildi' : order.source === 7 ? 'Trendyol kuryesine teslim edildi' : 'Platform kuryesine teslim edildi'
     const ready = order.status === 0 ? { status: 1, label: 'Onayla' } : order.status === 1 ? { status: 2, label: 'Hazırlandı' } : null
     return <span className="billing-row-actions">
       {ready && order.allowedNextStatuses.includes(ready.status) && <button className="row-action" onClick={() => onChange(ready.status)}>{ready.label}</button>}

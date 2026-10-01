@@ -18,6 +18,7 @@ namespace DeliveryOps.Integrations.Api.Controllers;
 public sealed class IntegrationConnectionsController(IntegrationsDbContext context, CoreOrdersClient coreOrdersClient,
     WebhookSecretProtector secretProtector, ProviderAdapterRegistry adapterRegistry,
     YemeksepetiPartnerClient yemeksepetiPartnerClient, GetirFoodClient getirFoodClient,
+    TrendyolGoClient trendyolClient,
     IntegrationConnectionHealthChecker healthChecker, TimeProvider timeProvider,
     IOptions<IntegrationSecurityOptions> securityOptions,
     ILogger<IntegrationConnectionsController> logger) : ControllerBase
@@ -153,6 +154,58 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         return Ok(Map(connection));
     }
 
+    [HttpPut("{id:guid}/trendyol-credentials")]
+    [Authorize(Policy = Permissions.IntegrationsWrite)]
+    public async Task<ActionResult<IntegrationConnectionResponse>> ConfigureTrendyol(Guid id,
+        ConfigureTrendyolRequest request, CancellationToken cancellationToken)
+    {
+        IntegrationConnection? connection = await context.Connections.FindAsync([id], cancellationToken);
+        if (connection is null) return NotFound();
+        if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
+        if (connection.Provider != IntegrationProvider.Trendyol)
+            return BadRequest(new ProblemDetails { Title = "Bu bağlantı Trendyol bağlantısı değil.", Status = 400 });
+        string supplierId = request.SupplierId?.Trim() ?? string.Empty;
+        string storeId = request.StoreId?.Trim() ?? string.Empty;
+        string email = request.ExecutorEmail?.Trim() ?? string.Empty;
+        Dictionary<string, string[]> errors = [];
+        if (!long.TryParse(supplierId, out _)) errors["supplierId"] = ["Satıcı ID sayısal olmalıdır."];
+        if (!long.TryParse(storeId, out _)) errors["storeId"] = ["Şube (store) ID sayısal olmalıdır."];
+        if (string.IsNullOrWhiteSpace(request.ApiKey) || string.IsNullOrWhiteSpace(request.ApiSecret))
+            errors["credentials"] = ["API Key ve API Secret zorunludur."];
+        if (!System.Net.Mail.MailAddress.TryCreate(email, out _) || email.Length > 200)
+            errors["executorEmail"] = ["İşlemi yapan kişinin e-posta adresi geçerli olmalıdır."];
+        if (errors.Count > 0) return BadRequest(new ValidationProblemDetails(errors));
+        TrendyolCredentials credentials = new(request.ApiKey.Trim(), request.ApiSecret.Trim(), storeId, email);
+        // Read one page before saving: it proves the keys, supplier id and store id are accepted.
+        try
+        {
+            await trendyolClient.GetPackagesAsync(request.Environment, supplierId, credentials, null, null, 0, 1,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(exception, "Trendyol check failed while configuring connection {ConnectionId}.", id);
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Trendyol API bilgileri doğrulanamadı.",
+                Detail = exception switch
+                {
+                    HttpRequestException { StatusCode: System.Net.HttpStatusCode.ServiceUnavailable } when
+                        request.Environment == ProviderEnvironment.Sandbox =>
+                        "Test ortamı IP yetkilendirmesi gerektirir (503). Sunucu IP'sini Trendyol'a bildirin.",
+                    HttpRequestException { StatusCode: not null } =>
+                        "Trendyol bilgileri kabul etmedi. Ortamı, satıcı ID, şube ID ve API anahtarlarını kontrol edin.",
+                    _ => "Trendyol servisine ulaşılamadı. Daha sonra tekrar deneyin."
+                },
+                Status = 400
+            });
+        }
+        connection.ConfigureProvider(supplierId, secretProtector.Protect(JsonSerializer.Serialize(credentials)),
+            request.Environment);
+        await context.SaveChangesAsync(cancellationToken);
+        return Ok(Map(connection));
+    }
+
     [HttpPost("{id:guid}/test")]
     [Authorize(Policy = Permissions.IntegrationsWrite)]
     public async Task<ActionResult<IntegrationConnectionTestResponse>> TestConnection(Guid id,
@@ -161,11 +214,15 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         IntegrationConnection? connection = await context.Connections.FindAsync([id], cancellationToken);
         if (connection is null) return NotFound();
         if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
-        if (connection.Provider is not (IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir))
+        if (connection.Provider is not (IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir or IntegrationProvider.Trendyol))
             return BadRequest(new ProblemDetails { Title = "Bu bağlantı için bağlantı testi desteklenmiyor.", Status = 400 });
         if (!connection.CredentialsConfigured)
-            return BadRequest(new ProblemDetails { Title = connection.Provider == IntegrationProvider.Getir
-                ? "Önce Getir anahtarlarını kaydedin." : "Önce Yemeksepeti OAuth bilgilerini kaydedin.", Status = 400 });
+            return BadRequest(new ProblemDetails { Title = connection.Provider switch
+            {
+                IntegrationProvider.Getir => "Önce Getir anahtarlarını kaydedin.",
+                IntegrationProvider.Trendyol => "Önce Trendyol API bilgilerini kaydedin.",
+                _ => "Önce Yemeksepeti OAuth bilgilerini kaydedin."
+            }, Status = 400 });
 
         IntegrationConnectionHealthResult result = await healthChecker.CheckAsync(
             connection, automatic: false, cancellationToken);
@@ -219,7 +276,8 @@ public sealed class IntegrationConnectionsController(IntegrationsDbContext conte
         if (!TenantScope.CanAccess(User, connection.BusinessId)) return Forbid();
         connection.SetActive(request.IsActive);
         await context.SaveChangesAsync(cancellationToken);
-        if (!request.IsActive && connection.Provider is IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir)
+        if (!request.IsActive && connection.Provider is IntegrationProvider.Yemeksepeti or IntegrationProvider.Getir
+                or IntegrationProvider.Trendyol)
         {
             try
             {
@@ -330,6 +388,8 @@ public sealed record ConfigureYemeksepetiRequest(string ClientId, string ClientS
     string ChainId, ProviderEnvironment Environment = ProviderEnvironment.Sandbox);
 public sealed record ConfigureGetirRequest(string AppSecretKey, string RestaurantSecretKey,
     ProviderEnvironment Environment = ProviderEnvironment.Sandbox);
+public sealed record ConfigureTrendyolRequest(string SupplierId, string StoreId, string ApiKey, string ApiSecret,
+    string ExecutorEmail, ProviderEnvironment Environment = ProviderEnvironment.Sandbox);
 public sealed record OutboundEventResponse(Guid Id, Guid ConnectionId, Guid CoreOrderId,
     string ExternalOrderId, string ProviderStatus, OutboundEventStatus Status, int Attempts,
     string? LastError, DateTimeOffset CreatedAtUtc, DateTimeOffset? NextAttemptAtUtc,

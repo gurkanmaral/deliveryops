@@ -21,6 +21,7 @@ public sealed class InternalOrderStatusController(IntegrationsDbContext context,
     {
         if (request.EventId == Guid.Empty || request.OrderId == Guid.Empty) return NoContent();
         if (request.Source == CoreOrderSource.Getir) return await ReceiveGetirAsync(request, cancellationToken);
+        if (request.Source == CoreOrderSource.Trendyol) return await ReceiveTrendyolAsync(request, cancellationToken);
         if (request.Source != CoreOrderSource.Yemeksepeti) return NoContent();
         if (await context.OutboundOrderEvents.AnyAsync(x => x.SourceEventId == request.EventId,
                 cancellationToken)) return Accepted();
@@ -104,6 +105,84 @@ public sealed class InternalOrderStatusController(IntegrationsDbContext context,
         return Accepted();
     }
 
+    private async Task<ActionResult> ReceiveTrendyolAsync(CoreOrderStatusEvent request, CancellationToken cancellationToken)
+    {
+        if (await context.OutboundOrderEvents.AnyAsync(x => x.SourceEventId == request.EventId, cancellationToken))
+            return Accepted();
+        InboundOrderEvent? inbound = await context.InboundOrderEvents.AsNoTracking()
+            .Include(x => x.Connection)
+            .Where(x => x.CoreOrderId == request.OrderId && x.Connection.IsActive &&
+                        x.Connection.Provider == IntegrationProvider.Trendyol)
+            .OrderByDescending(x => x.ProcessedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (inbound is null)
+            return Conflict(new ProblemDetails
+            {
+                Title = "Kaynak entegrasyon olayı henüz hazır değil.",
+                Detail = "Core outbox olayı daha sonra yeniden denenecek.", Status = 409
+            });
+        int fulfillment = request.DeliveryFulfillment ?? ReadTrendyolFulfillment(inbound.RawPayload);
+        bool ownDelivery = fulfillment != 1;
+        string? providerStatus = request.Status switch
+        {
+            CoreOrderStatus.WaitingForCourier => TrendyolStatuses.Invoiced,
+            CoreOrderStatus.PickedUp when fulfillment == 0 => TrendyolStatuses.Shipped,
+            CoreOrderStatus.Delivered => ownDelivery ? TrendyolStatuses.Delivered : TrendyolStatuses.Invoiced,
+            CoreOrderStatus.Cancelled => TrendyolStatuses.Unsupplied,
+            _ => null
+        };
+        if (providerStatus is null) return NoContent();
+
+        // Do not echo a status Trendyol itself reported (e.g. its own cancellation or automatic invoicing).
+        string[] echoTypes = providerStatus switch
+        {
+            TrendyolStatuses.Invoiced => ["order.invoiced", "order.shipped", "order.delivered"],
+            TrendyolStatuses.Shipped => ["order.shipped", "order.delivered"],
+            TrendyolStatuses.Delivered => ["order.delivered"],
+            _ => ["order.cancelled", "order.unsupplied"]
+        };
+        List<InboundEventStatus> lifecycle = await context.InboundOrderEvents.AsNoTracking()
+            .Where(x => x.ConnectionId == inbound.ConnectionId && x.ExternalOrderId == inbound.ExternalOrderId &&
+                        echoTypes.Contains(x.EventType))
+            .Select(x => x.Status).ToListAsync(cancellationToken);
+        if (lifecycle.Contains(InboundEventStatus.Completed)) return NoContent();
+        if (lifecycle.Count > 0)
+            return Conflict(new ProblemDetails
+            {
+                Title = "Sağlayıcı kaynaklı durum olayı henüz tamamlanmadı.",
+                Detail = "Echo gönderimi engellemek için Core outbox olayı yeniden denenecek.", Status = 409
+            });
+        if (await context.OutboundOrderEvents.AnyAsync(x => x.ConnectionId == inbound.ConnectionId &&
+                x.ExternalOrderId == inbound.ExternalOrderId && x.ProviderStatus == providerStatus, cancellationToken))
+            return Accepted();
+        context.OutboundOrderEvents.Add(OutboundOrderEvent.Create(request.EventId, inbound.ConnectionId,
+            request.OrderId, inbound.ExternalOrderId, providerStatus, request.CancellationReason,
+            timeProvider.GetUtcNow()));
+        await context.SaveChangesAsync(cancellationToken);
+        return Accepted();
+    }
+
+    /// <summary>0 = restaurant courier, 1 = Trendyol courier (GO), 2 = customer pickup.</summary>
+    private static int ReadTrendyolFulfillment(string rawPayload)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(rawPayload);
+            JsonElement root = document.RootElement;
+            if (root.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Array &&
+                content.GetArrayLength() == 1)
+                root = content[0];
+            if (root.TryGetProperty("storePickupSelected", out JsonElement pickup) && pickup.ValueKind == JsonValueKind.True)
+                return 2;
+            string type = root.TryGetProperty("deliveryType", out JsonElement value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : root.TryGetProperty("deliveryModel", out JsonElement model) && model.ValueKind == JsonValueKind.String
+                    ? model.GetString() ?? string.Empty : string.Empty;
+            return string.Equals(type, "GO", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        }
+        catch (JsonException) { return 0; }
+    }
+
     private static int? ReadGetirDeliveryType(string rawPayload)
     {
         try
@@ -148,6 +227,14 @@ public enum CoreOrderStatus { New, Confirmed, WaitingForCourier, Assigned, Picke
 public sealed record CoreOrderStatusEvent(Guid EventId, Guid OrderId, Guid BusinessId, Guid BranchId,
     string ExternalId, CoreOrderSource Source, CoreOrderStatus Status, string? CancellationReason,
     DateTimeOffset OccurredAtUtc, int? DeliveryFulfillment = null);
+
+public static class TrendyolStatuses
+{
+    public const string Invoiced = "TRENDYOL_INVOICED";
+    public const string Shipped = "TRENDYOL_SHIPPED";
+    public const string Delivered = "TRENDYOL_DELIVERED";
+    public const string Unsupplied = "TRENDYOL_UNSUPPLIED";
+}
 
 public static class GetirStatuses
 {

@@ -323,6 +323,17 @@ Bu sözleşme Windows POS uygulaması için doğrudan kullanılabilir. Yemeksepe
 
 Panelden yapılan iptaller Getir'e gönderilmez (Getir iptal nedeni kimliği ister); Getir siparişlerini Getir restoran panelinden iptal edin. Getir siparişlerinin mutfağa hemen düşmesi için işletmede otomatik onayın açık olması önerilir.
 
+### Trendyol Go – Yemek entegrasyonu
+
+Uber Eats Trendyol Go – Yemek API'si (developers.tgoapps.com) yemek siparişleri için webhook göndermez; siparişler API'den çekilir.
+
+1. Panelde sağlayıcı **Trendyol** ile bağlantı oluşturulur (webhook URL'sinin Trendyol'a verilmesi gerekmez).
+2. `Anahtarları gir` ile satıcı ID, şube (store) ID, API Key, API Secret, işlemi yapan e-posta (`x-executor-user`) ve ortam kaydedilir. Bilgiler Trendyol Satıcı Paneli > Hesap Bilgilerim > Entegrasyon Bilgileri'ndedir. Kaydetmeden önce sipariş listesi okunarak doğrulanır, şifreli saklanır. İstekler Basic Auth, `User-Agent: {satıcıId} - SelfIntegration` ve `x-agentname` başlıklarıyla gider (`Trendyol:AgentName` ile değiştirilebilir). Test (stage) ortamı sunucu IP'sinin Trendyol'a bildirilmesini gerektirir; aksi halde 503 döner.
+3. `TrendyolOrderPollingWorker` her `Trendyol:PollIntervalSeconds` (varsayılan 15) saniyede aktif bağlantıların son değişen paketlerini okur. Her paket durumu (paket id + statü) tek bir inbound olaydır; webhook ile aynı işleme hattından geçer.
+4. `Created` paket Core'da sipariş olur olmaz Trendyol'da kabul edilir (`packages/picked`, hazırlık süresi paketteki değer veya `Trendyol:DefaultPreparationMinutes`).
+5. Core → Trendyol: *Kurye bekliyor* → `invoiced`; kendi kuryemiz paketi aldı → `manual-shipped`; teslim → `manual-delivered` (kendi kurye ve gel-al); panelden iptal → `unsupplied` (tüm ürünler, neden `Trendyol:CancelReasonId`, varsayılan 623 "Mağaza siparişi hazırlayamıyor"). Trendyol kuryesiyle giden siparişlerde teslimi Trendyol bildirir; panelde **Trendyol kuryesine teslim edildi** düğmesi siparişi kapatır.
+6. Trendyol'un kendi bildirdiği durumlar (iptal, otomatik invoiced, teslim) geri gönderilmez. Maskeli adreslerde `address1` serbest metin olarak kullanılır; müşteri araması için `callCenterPhone` + `pinCode` teslimat notuna yazılır.
+
 ### Yemeksepeti durum senkronizasyonu
 
 Yemeksepeti bağlantısındaki `OAuth ayarla` işlemiyle sandbox veya production ortamı, `chain_id`, `client_id` ve `client_secret` kaydedilir. Client bilgileri Data Protection ile şifrelenir; API yalnızca bilgilerin yapılandırılmış olup olmadığını döndürür ve secret'ı geri göstermez. OAuth token'ı `expires_in` süresine göre bellekte tekrar kullanılır.

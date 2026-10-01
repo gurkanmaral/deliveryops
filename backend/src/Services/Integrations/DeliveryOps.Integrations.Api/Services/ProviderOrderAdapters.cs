@@ -257,14 +257,17 @@ public sealed class TrendyolWebhookV1OrderAdapter : IOrderProviderAdapter
             string externalId = string.IsNullOrWhiteSpace(packageId) ? orderNumber : $"{orderNumber}-{packageId}";
             string status = ProviderPayload.FirstString(package, "packageStatus", "status");
             if (string.IsNullOrWhiteSpace(status)) status = "Delivered";
+            // A package accepted on Trendyol's own tablet before we read it is still a new order for us.
+            if (string.Equals(status, "Picking", StringComparison.OrdinalIgnoreCase)) status = "Created";
             bool isCreated = string.Equals(status, "Created", StringComparison.OrdinalIgnoreCase);
             InboundOrderRequest order = isCreated
                 ? BuildTrendyolCreatedOrder(package, externalId)
                 : new InboundOrderRequest(externalId, "Trendyol Go Müşterisi", "Trendyol Go maskeli telefon",
                     "Trendyol Go teslimat adresi", 0);
-            string modified = ProviderPayload.FirstStringOrNumber(package, "timestamp", "lastModifiedDate", "packageModificationDate");
             string hash = ProviderPayload.Hash(rawPayload);
-            string eventId = $"{externalId}:{status.ToUpperInvariant()}:{(string.IsNullOrWhiteSpace(modified) ? hash[..12] : modified)}";
+            // Trendyol re-sends (and polling re-reads) the same package many times; package id + status is the
+            // documented idempotency key, so every later read of a status maps to the same event.
+            string eventId = $"{externalId}:{status.ToUpperInvariant()}";
             return ProviderPayload.Complete(rawPayload, eventId, $"order.{status.ToLowerInvariant()}", order, hash);
         }
         catch (JsonException exception)
@@ -284,16 +287,27 @@ public sealed class TrendyolWebhookV1OrderAdapter : IOrderProviderAdapter
         if (string.IsNullOrWhiteSpace(name)) name = "Trendyol Go Müşterisi";
         string phone = ProviderPayload.OptionalString(addressObject, "phone");
         if (string.IsNullOrWhiteSpace(phone)) phone = "Trendyol Go maskeli telefon";
-        string address = ProviderPayload.FirstString(addressObject, "address1", "fullAddress", "shortAddress");
+        string address = TrendyolAddress(addressObject);
         if (string.IsNullOrWhiteSpace(address)) address = "Trendyol Go teslimat adresi";
-        ProviderCoordinates coordinates = ProviderPayload.ReadCoordinates(addressObject,
-            "latitude", "longitude", "Trendyol Go");
+        // Orders delivered by the Trendyol courier carry "TGO Yemek" placeholders instead of coordinates.
+        ProviderCoordinates coordinates = IsPlaceholder(ProviderPayload.OptionalString(addressObject, "latitude"))
+            ? default
+            : ProviderPayload.ReadCoordinates(addressObject, "latitude", "longitude", "Trendyol Go");
+        string pinCode = ProviderPayload.OptionalStringOrNumber(addressObject, "pinCode");
+        string callCenter = ProviderPayload.OptionalString(package, "callCenterPhone");
+        string orderCode = ProviderPayload.OptionalString(package, "orderCode");
         string? instructions = ProviderPayload.NormalizeOptional(string.Join(" · ", new[]
         {
-            ProviderPayload.OptionalString(addressObject, "addressDescription"),
+            Clean(ProviderPayload.OptionalString(addressObject, "addressDescription")),
             ProviderPayload.OptionalString(package, "customerNote"),
-            customer.HasValue ? ProviderPayload.OptionalString(customer.Value, "note") : string.Empty
+            customer.HasValue ? ProviderPayload.OptionalString(customer.Value, "note") : string.Empty,
+            string.IsNullOrWhiteSpace(orderCode) ? string.Empty : $"Sipariş kodu: {orderCode}",
+            // Customer phone numbers are masked: the courier calls the given number and enters the pin code.
+            string.IsNullOrWhiteSpace(pinCode) ? string.Empty
+                : $"Müşteri arama: {(string.IsNullOrWhiteSpace(callCenter) ? phone : callCenter)} · kod {pinCode}",
+            TrendyolPaymentText(package)
         }.Where(x => !string.IsNullOrWhiteSpace(x))));
+        if (instructions is { Length: > 2000 }) instructions = instructions[..2000];
         decimal total = ProviderPayload.OptionalDecimal(package, "totalPrice")
             ?? ProviderPayload.OptionalDecimal(package, "packageGrossAmount") ?? 0;
         bool pickup = ProviderPayload.OptionalBoolean(package, "storePickupSelected") == true;
@@ -304,9 +318,75 @@ public sealed class TrendyolWebhookV1OrderAdapter : IOrderProviderAdapter
                 ? ProviderDeliveryFulfillment.ProviderCourier
                 : ProviderDeliveryFulfillment.MerchantCourier;
         InboundOrderRequest order = new(externalId, name, phone, address, total,
-            coordinates.Latitude, coordinates.Longitude, instructions, fulfillment);
+            coordinates.Latitude, coordinates.Longitude, instructions, fulfillment, TrendyolPayment(package, total));
         ProviderPayload.ValidateOrder(order);
         return order;
+    }
+
+    private static bool IsPlaceholder(string value) =>
+        value.Contains("TGO Yemek", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("Trendyol Go", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("TGO Hızlı Market", StringComparison.OrdinalIgnoreCase);
+
+    private static string Clean(string value) => IsPlaceholder(value) ? string.Empty : value;
+
+    /// <summary>
+    /// address1 holds the real street address (and, for Uber stores, the free-text apartment/floor/door) and
+    /// must not be parsed; the separate apartment fields are appended only while they still carry real values.
+    /// </summary>
+    private static string TrendyolAddress(JsonElement address)
+    {
+        string main = Clean(ProviderPayload.FirstString(address, "address1", "fullAddress", "shortAddress"));
+        if (string.IsNullOrWhiteSpace(main)) return string.Empty;
+        List<string> parts = [main];
+        foreach ((string field, string label) in new[] { ("apartmentNumber", "Bina"), ("floor", "Kat"), ("doorNumber", "Daire") })
+        {
+            string value = Clean(ProviderPayload.OptionalStringOrNumber(address, field));
+            if (!string.IsNullOrWhiteSpace(value)) parts.Add($"{label} {value}");
+        }
+        foreach (string field in new[] { "neighborhood", "district", "city" })
+        {
+            string value = Clean(ProviderPayload.OptionalString(address, field));
+            if (!string.IsNullOrWhiteSpace(value)) parts.Add(value);
+        }
+        return string.Join(", ", parts);
+    }
+
+    private static string OnDeliveryType(JsonElement package)
+    {
+        JsonElement? payment = ProviderPayload.OptionalObject(package, "payment");
+        if (!payment.HasValue || !payment.Value.TryGetProperty("onDelivery", out JsonElement onDelivery)) return string.Empty;
+        if (onDelivery.ValueKind == JsonValueKind.String) return onDelivery.GetString()?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (onDelivery.ValueKind != JsonValueKind.Object) return string.Empty;
+        return ProviderPayload.FirstString(onDelivery, "paymentType", "type", "name").ToUpperInvariant();
+    }
+
+    private static InboundPayment? TrendyolPayment(JsonElement package, decimal total)
+    {
+        JsonElement? payment = ProviderPayload.OptionalObject(package, "payment");
+        if (!payment.HasValue) return null;
+        string type = ProviderPayload.OptionalString(payment.Value, "paymentType").ToUpperInvariant();
+        if (type == "PAY_WITH_ON_DELIVERY")
+            return new InboundPayment(OnDeliveryType(package) == "CASH" ? InboundPaymentMethod.Cash : InboundPaymentMethod.Card,
+                false, total);
+        return string.IsNullOrWhiteSpace(type) ? null : new InboundPayment(InboundPaymentMethod.Online, true, total);
+    }
+
+    private static string TrendyolPaymentText(JsonElement package)
+    {
+        JsonElement? payment = ProviderPayload.OptionalObject(package, "payment");
+        if (!payment.HasValue) return string.Empty;
+        string type = ProviderPayload.OptionalString(payment.Value, "paymentType").ToUpperInvariant();
+        if (type != "PAY_WITH_ON_DELIVERY") return string.IsNullOrWhiteSpace(type) ? string.Empty : "Ödeme: Online ödendi";
+        string onDelivery = OnDeliveryType(package);
+        string label = onDelivery switch
+        {
+            "CASH" => "nakit",
+            "CARD" => "kredi kartı",
+            "" => "belirtilmedi",
+            _ => onDelivery.Replace('_', ' ').ToLowerInvariant()
+        };
+        return $"Ödeme: Kapıda {label}";
     }
 }
 
