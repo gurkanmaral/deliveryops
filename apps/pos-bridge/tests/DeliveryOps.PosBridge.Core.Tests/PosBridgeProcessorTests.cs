@@ -80,6 +80,39 @@ public sealed class PosBridgeProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task Retryable_failure_stops_the_cycle_so_a_payment_never_overtakes_its_order()
+    {
+        Directory.CreateDirectory(_directory);
+        string order = Path.Combine(_directory, "KASA-1.json");
+        string payment = Path.Combine(_directory, "KASA-1-paid.json");
+        await File.WriteAllTextAsync(order,
+            """{"externalOrderId":"KASA-1","customerName":"Ada","customerPhone":"555","deliveryAddress":"Istanbul","totalAmount":100}""");
+        File.SetCreationTimeUtc(order, DateTime.UtcNow.AddMinutes(-2));
+        await File.WriteAllTextAsync(payment,
+            """{"externalOrderId":"KASA-1","eventId":"KASA-1:paid","eventType":"order.paid","customerName":"Ada","customerPhone":"555","deliveryAddress":"Istanbul","totalAmount":100,"payment":{"method":"cash","status":"paid","amount":100}}""");
+        File.SetCreationTimeUtc(payment, DateTime.UtcNow.AddMinutes(-1));
+        CountingSender sender = new(OrderSendResult.Failed("offline", true));
+        PosBridgeProcessor processor = new(new FolderOrderQueue(), sender);
+
+        ProcessingCycleResult result = await processor.ProcessOnceAsync(Settings(), CancellationToken.None);
+
+        Assert.Equal(1, result.Retrying);
+        Assert.Equal(1, sender.Calls);
+        Assert.True(File.Exists(order));
+        Assert.True(File.Exists(payment));
+    }
+
+    private sealed class CountingSender(OrderSendResult result) : IOrderSender
+    {
+        public int Calls { get; private set; }
+        public Task<OrderSendResult> SendAsync(BridgeRuntimeSettings settings, PosOrder order, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(result);
+        }
+    }
+
+    [Fact]
     public async Task Expired_processed_and_failed_archives_are_deleted()
     {
         string processed = Path.Combine(_directory, "processed");

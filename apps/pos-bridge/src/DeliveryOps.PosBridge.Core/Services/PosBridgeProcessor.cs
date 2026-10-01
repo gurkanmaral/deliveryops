@@ -44,6 +44,9 @@ public sealed class PosBridgeProcessor(IOrderQueue queue, IOrderSender sender)
             {
                 retrying++;
                 Log(BridgeLogLevel.Warning, $"Temporary failure; order will retry: {result.Error}", queued.Order.ExternalOrderId);
+                // Keep the inbox order: a payment queued behind its order must not reach DeliveryOps first,
+                // and while the connection is down every later file would fail the same way.
+                break;
             }
             else
             {

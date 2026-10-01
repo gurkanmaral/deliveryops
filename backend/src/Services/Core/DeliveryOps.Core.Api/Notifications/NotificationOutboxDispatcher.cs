@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using DeliveryOps.Core.Domain.Dispatch;
 using DeliveryOps.Core.Domain.Enums;
 using DeliveryOps.Core.Domain.Entities;
 using DeliveryOps.Core.Infrastructure.Persistence;
@@ -97,7 +98,7 @@ public sealed class NotificationOutboxDispatcher(IServiceScopeFactory scopeFacto
     /// open shift, available, and in the order's branch (or unassigned to a branch). Resolved at send time
     /// so a courier who ended the shift after the order was created is not woken up.
     /// </summary>
-    private static async Task<string> WithEligibleCouriersAsync(CoreDbContext database,
+    private async Task<string> WithEligibleCouriersAsync(CoreDbContext database,
         NotificationOutboxMessage message, CancellationToken cancellationToken)
     {
         if (message.EventType != "OrderAvailable") return message.PayloadJson;
@@ -111,8 +112,55 @@ public sealed class NotificationOutboxDispatcher(IServiceScopeFactory scopeFacto
                         database.CourierShifts.Any(shift => shift.CourierId == x.Id && shift.EndedAtUtc == null))
             .Select(x => x.Id)
             .ToArrayAsync(cancellationToken);
+        courierIds = await FilterClaimableAsync(database, message.BusinessId, branchId, courierIds,
+            timeProvider.GetUtcNow(), cancellationToken);
         payload["EligibleCourierIds"] = new JsonArray(courierIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
         return payload.ToJsonString();
+    }
+
+    /// <summary>
+    /// Applies the same rules as the package pool and claim: self-claim enabled, below the active-package
+    /// limit, and not known to be outside the pickup radius. Couriers without a fresh position are kept,
+    /// because the push is what brings the app to the foreground and refreshes the position.
+    /// </summary>
+    public static async Task<Guid[]> FilterClaimableAsync(CoreDbContext database, Guid businessId, Guid? branchId,
+        Guid[] courierIds, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (courierIds.Length == 0) return courierIds;
+        BusinessDispatchSettings? settings = await database.BusinessDispatchSettings.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.BusinessId == businessId, cancellationToken);
+        if (settings is { AllowCourierSelfClaim: false }) return [];
+        int maxActive = settings?.MaxActiveOrdersPerCourier ?? 2;
+        OrderStatus[] activeStatuses = [OrderStatus.Assigned, OrderStatus.PickedUp, OrderStatus.OnTheWay, OrderStatus.DeliveryFailed];
+        HashSet<Guid> full = (await database.Orders.AsNoTracking()
+                .Where(x => x.CourierId.HasValue && courierIds.Contains(x.CourierId.Value) && activeStatuses.Contains(x.Status))
+                .GroupBy(x => x.CourierId!.Value)
+                .Select(group => new { CourierId = group.Key, Count = group.Count() })
+                .ToListAsync(cancellationToken))
+            .Where(x => x.Count >= maxActive).Select(x => x.CourierId).ToHashSet();
+
+        Branch? branch = branchId.HasValue
+            ? await database.Branches.AsNoTracking().SingleOrDefaultAsync(x => x.Id == branchId.Value, cancellationToken)
+            : null;
+        HashSet<Guid> outOfRange = [];
+        if (branch?.Latitude is not null && branch.Longitude is not null)
+        {
+            double radiusKm = settings?.AssignmentRadiusKm ?? 10;
+            DateTimeOffset freshAfter = now.AddMinutes(-(settings?.LocationFreshnessMinutes ?? 5));
+            var latestTimes = database.CourierLocations.AsNoTracking()
+                .Where(x => courierIds.Contains(x.CourierId) && x.RecordedAtUtc >= freshAfter)
+                .GroupBy(x => x.CourierId)
+                .Select(group => new { CourierId = group.Key, RecordedAtUtc = group.Max(x => x.RecordedAtUtc) });
+            var latest = await (from location in database.CourierLocations.AsNoTracking()
+                                join time in latestTimes
+                                    on new { location.CourierId, location.RecordedAtUtc }
+                                    equals new { time.CourierId, time.RecordedAtUtc }
+                                select new { location.CourierId, location.Position }).ToListAsync(cancellationToken);
+            outOfRange = latest.Where(x => CourierAssignmentRanker.CalculateDistanceKm(x.Position.Y, x.Position.X,
+                    branch.Latitude, branch.Longitude) > radiusKm)
+                .Select(x => x.CourierId).ToHashSet();
+        }
+        return courierIds.Where(id => !full.Contains(id) && !outOfRange.Contains(id)).ToArray();
     }
 
     private void LogFailure(NotificationOutboxMessage message, Guid id, Exception? exception)

@@ -24,11 +24,18 @@ public sealed class CoreOrdersClient(HttpClient client)
             IntegrationProvider.Trendyol => 7,
             _ => 6
         };
+        // Provider texts are free-form; trim them to Core's limits instead of having the whole order rejected
+        // (a rejected Getir/Trendyol order is never accepted on the platform).
         object payload = new
         {
             connection.BusinessId, connection.BranchId, ExternalId = order.ExternalOrderId,
-            order.CustomerName, order.CustomerPhone, order.DeliveryAddress, Source = source, order.TotalAmount,
-            order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryInstructions,
+            CustomerName = Fit(order.CustomerName, CoreOrderLimits.CustomerName),
+            CustomerPhone = Fit(order.CustomerPhone, CoreOrderLimits.CustomerPhone),
+            DeliveryAddress = Fit(order.DeliveryAddress, CoreOrderLimits.DeliveryAddress),
+            Source = source, order.TotalAmount,
+            order.DeliveryLatitude, order.DeliveryLongitude,
+            DeliveryInstructions = order.DeliveryInstructions is null
+                ? null : Fit(order.DeliveryInstructions, CoreOrderLimits.DeliveryInstructions),
             DeliveryFulfillment = (int)order.DeliveryFulfillment,
             Payment = order.Payment?.ToCorePayload()
         };
@@ -40,6 +47,12 @@ public sealed class CoreOrdersClient(HttpClient client)
         }
         return await response.Content.ReadFromJsonAsync<CoreOrderResult>(cancellationToken)
                ?? throw new HttpRequestException("Core API returned an empty response.");
+    }
+
+    public static string Fit(string value, int maxLength)
+    {
+        string trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..(maxLength - 1)].TrimEnd() + "…";
     }
 
     public async Task<CoreOrderResult> ApplyProviderEventAsync(IntegrationConnection connection,
@@ -94,6 +107,15 @@ public sealed class CoreOrdersClient(HttpClient client)
                 $"Core API rejected integration health ({(int)response.StatusCode}): {detail}");
         }
     }
+}
+
+/// <summary>Field limits of Core's CreateOrderValidator.</summary>
+public static class CoreOrderLimits
+{
+    public const int CustomerName = 160;
+    public const int CustomerPhone = 30;
+    public const int DeliveryAddress = 500;
+    public const int DeliveryInstructions = 1000;
 }
 
 public sealed record InboundOrderRequest(string ExternalOrderId, string CustomerName, string CustomerPhone,

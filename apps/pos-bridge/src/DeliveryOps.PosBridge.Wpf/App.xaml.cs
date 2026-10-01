@@ -13,6 +13,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // The cashier screen must stay open during service: report unexpected UI errors instead of closing.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            MessageBox.Show($"Beklenmeyen bir hata oluştu: {args.Exception.Message}", "DeliveryOps Kasa",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true;
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) => args.SetObserved();
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         WebhookOrderSender sender = new(_httpClient);
         PosBridgeProcessor processor = new(new FolderOrderQueue(), sender);

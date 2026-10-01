@@ -180,6 +180,42 @@ public sealed class PostgresPersistenceTests(PostgresFixture fixture)
         Assert.True(await read.Orders.AnyAsync(x => x.Id == order.Id && x.CustomerSearchTokens.Contains(phoneToken)));
     }
 
+    [Fact]
+    public async Task Package_push_skips_full_and_far_couriers_but_keeps_couriers_without_position()
+    {
+        (Guid businessId, Guid branchId) = await SeedBusinessAsync();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Courier near = Courier.Create(businessId, branchId, "Yakın", "Kurye", "05550000001");
+        Courier far = Courier.Create(businessId, branchId, "Uzak", "Kurye", "05550000002");
+        Courier busy = Courier.Create(businessId, branchId, "Dolu", "Kurye", "05550000003");
+        Courier unknown = Courier.Create(businessId, branchId, "Konumsuz", "Kurye", "05550000004");
+        await using (CoreDbContext context = fixture.CreateContext())
+        {
+            context.Couriers.AddRange(near, far, busy, unknown);
+            // Branch is at 41.0, 29.0; default radius 10 km.
+            context.CourierLocations.AddRange(
+                CourierLocation.Create(near.Id, businessId, 41.01, 29.01, null, null, null, now.AddMinutes(-1)),
+                CourierLocation.Create(far.Id, businessId, 41.0, 29.0, null, null, null, now.AddMinutes(-3)),
+                CourierLocation.Create(far.Id, businessId, 41.5, 29.5, null, null, null, now.AddMinutes(-1)),
+                CourierLocation.Create(busy.Id, businessId, 41.0, 29.0, null, null, null, now.AddMinutes(-1)));
+            for (int i = 0; i < 2; i++)
+            {
+                Order order = CreateOrder(businessId, branchId, $"BUSY-{Guid.NewGuid():N}", $"busy-{Guid.NewGuid():N}");
+                order.ChangeStatus(OrderStatus.Confirmed, Guid.NewGuid());
+                order.ChangeStatus(OrderStatus.WaitingForCourier, Guid.NewGuid());
+                order.AssignCourier(busy.Id, Guid.NewGuid());
+                context.Orders.Add(order);
+            }
+            await context.SaveChangesAsync();
+        }
+
+        await using CoreDbContext read = fixture.CreateContext();
+        Guid[] eligible = await DeliveryOps.Core.Api.Notifications.NotificationOutboxDispatcher.FilterClaimableAsync(
+            read, businessId, branchId, [near.Id, far.Id, busy.Id, unknown.Id], now, CancellationToken.None);
+
+        Assert.Equal([near.Id, unknown.Id], eligible);
+    }
+
     private async Task<(Guid BusinessId, Guid BranchId)> SeedBusinessAsync()
     {
         await using CoreDbContext context = fixture.CreateContext();
