@@ -1,0 +1,8 @@
+[
+  {
+    "id": "GHSA-86w9-cpqp-85rv",
+    "package": "node-forge",
+    "reason": "No patched node-forge release (all versions <= 1.4.0 affected). Only reached through expo -> @expo/cli -> @expo/code-signing-certificates, i.e. build/CLI tooling, not code bundled into the courier app. Remove once node-forge or Expo ships a fix.",
+    "expires": "2026-12-31"
+  }
+]
