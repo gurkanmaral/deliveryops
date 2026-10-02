@@ -38,6 +38,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public string CreateSearchToken(string search) => _piiProtector.CreateSearchToken(search);
 
+    public IOrderPiiProtector PiiProtector => _piiProtector;
+
     public Task DisposeAsync() => _container.DisposeAsync().AsTask();
 
     private sealed class TestRequestContext : IRequestContext

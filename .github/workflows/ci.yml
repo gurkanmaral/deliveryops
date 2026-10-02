@@ -58,7 +58,9 @@ jobs:
           cache: npm
           cache-dependency-path: apps/courier-mobile/package-lock.json
       - run: npm ci
-      - run: npm audit --audit-level=high
+      # Advisories without a patched release are accepted only through a reviewed, expiring
+      # allow-list (audit-allowlist.json); everything else at "high" or above still fails.
+      - run: node ../../scripts/npm-audit.mjs --audit-level=high
       - run: npx expo install --check
       - run: npx expo-doctor
       - run: npm run typecheck

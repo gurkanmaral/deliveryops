@@ -115,6 +115,29 @@ public sealed class CourierDispatchTests(PostgresFixture fixture)
         Assert.True((await AssignAsync(seed, orders[2].Id, offShift.Id)).IsFailure);
     }
 
+    [Fact]
+    public async Task Courier_order_list_contains_only_their_own_packages()
+    {
+        Seed seed = await SeedAsync();
+        Courier courier = await AddCourierAsync(seed, NearLat, NearLon);
+        Courier other = await AddCourierAsync(seed, NearLat, NearLon);
+        Order mine = await AddWaitingOrderAsync(seed);
+        Order theirs = await AddWaitingOrderAsync(seed);
+        await AddWaitingOrderAsync(seed); // unassigned: only visible through the pool, without customer data
+        Assert.True((await ClaimAsync(seed, courier, mine.Id)).IsSuccess);
+        Assert.True((await ClaimAsync(seed, other, theirs.Id)).IsSuccess);
+
+        await using CoreDbContext context = fixture.CreateContext();
+        GetOrdersHandler handler = new(context, CourierContext(seed, courier), fixture.PiiProtector);
+        Result<PagedResponse<OrderResponse>> own = await handler.Handle(new GetOrdersQuery(null, null, null, null, null,
+            null, null, null, null, 1, 100, null, "-created"), CancellationToken.None);
+        Result<PagedResponse<OrderResponse>> spoofed = await handler.Handle(new GetOrdersQuery(null, null, other.Id, null,
+            null, null, null, null, null, 1, 100, null, "-created"), CancellationToken.None);
+
+        Assert.Equal([mine.Id], own.Value!.Items.Select(x => x.Id));
+        Assert.True(spoofed.IsFailure);
+    }
+
     private async Task<Result<PagedResponse<AvailableOrderResponse>>> PoolAsync(Seed seed, Courier courier)
     {
         await using CoreDbContext context = fixture.CreateContext();
