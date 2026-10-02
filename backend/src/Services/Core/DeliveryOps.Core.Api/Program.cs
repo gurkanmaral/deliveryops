@@ -173,6 +173,7 @@ builder.Services.AddAuthorization(options =>
 {
     foreach (string permission in Permissions.All)
         options.AddPolicy(permission, policy => policy.RequireClaim(Permissions.ClaimType, permission));
+    options.AddCorePolicies();
     foreach (string permission in new[]
              {
                  InternalPermissions.OrdersIngest,

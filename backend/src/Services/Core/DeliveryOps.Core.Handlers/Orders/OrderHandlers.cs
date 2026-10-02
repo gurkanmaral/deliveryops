@@ -31,7 +31,15 @@ public sealed class GetOrdersHandler(ICoreDbContext context, IRequestContext req
         if (businessId.HasValue) query = query.Where(x => x.BusinessId == businessId.Value);
         Guid? branchId = requestContext.BranchId ?? request.BranchId;
         if (branchId.HasValue) query = query.Where(x => x.BranchId == branchId.Value);
-        if (request.CourierId.HasValue) query = query.Where(x => x.CourierId == request.CourierId.Value);
+        // A courier only ever sees the packages assigned to them: other orders carry other customers' names,
+        // phones and addresses. The package pool has its own endpoint (/orders/available) without that data.
+        if (requestContext.CourierId.HasValue)
+        {
+            if (request.CourierId.HasValue && request.CourierId != requestContext.CourierId)
+                return Result<PagedResponse<OrderResponse>>.Failure(HandlerErrors.Forbidden);
+            query = query.Where(x => x.CourierId == requestContext.CourierId.Value);
+        }
+        else if (request.CourierId.HasValue) query = query.Where(x => x.CourierId == request.CourierId.Value);
         if (request.Status.HasValue) query = query.Where(x => x.Status == request.Status.Value);
         if (request.Source.HasValue) query = query.Where(x => x.Source == request.Source.Value);
         if (request.CreatedFrom.HasValue)

@@ -3,6 +3,7 @@ using DeliveryOps.BuildingBlocks.Security;
 using DeliveryOps.Core.Api.Reports;
 using DeliveryOps.Core.Queries.Reports;
 using MediatR;
+using DeliveryOps.Core.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace DeliveryOps.Core.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/reports")]
-[Authorize(Policy = Permissions.OrdersRead)]
+[Authorize(Policy = CorePolicies.ManagementReports)]
 public sealed class ReportsController(ISender sender) : ApiControllerBase
 {
     [HttpGet("operations")]

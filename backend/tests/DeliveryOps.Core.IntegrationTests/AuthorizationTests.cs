@@ -203,6 +203,33 @@ public sealed class AuthorizationTests : IClassFixture<CoreApiFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/v1/dashboard/summary")]
+    [InlineData("/api/v1/reports/operations")]
+    public async Task Courier_token_cannot_open_business_wide_dashboard_or_reports(string path)
+    {
+        Guid businessId;
+        Guid courierId;
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            CoreDbContext context = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Business business = Business.Create($"Courier reports {Guid.NewGuid():N}", $"CR{Guid.NewGuid():N}"[..12]);
+            Courier courier = Courier.Create(business.Id, null, "Test", "Kurye", $"5{Random.Shared.NextInt64(100000000, 999999999)}");
+            context.AddRange(business, courier);
+            await context.SaveChangesAsync();
+            businessId = business.Id;
+            courierId = courier.Id;
+        }
+        using HttpRequestMessage courierRequest = Authorized(HttpMethod.Get, path, Permissions.OrdersRead);
+        courierRequest.Headers.Add("X-Test-Business", businessId.ToString());
+        courierRequest.Headers.Add("X-Test-Courier", courierId.ToString());
+        using HttpRequestMessage staffRequest = Authorized(HttpMethod.Get, path, Permissions.OrdersRead);
+        staffRequest.Headers.Add("X-Test-Business", businessId.ToString());
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(courierRequest)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(staffRequest)).StatusCode);
+    }
+
     [Fact]
     public async Task Courier_queue_returns_only_nearby_pickups_and_does_not_expose_customer_pii()
     {
